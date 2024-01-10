@@ -16,9 +16,9 @@ workspace "template"
         kind "StaticLib"
         language "C++"
         targetdir "build/lib/%{cfg.buildcfg}"
-        buildoptions { "-Wall", "-Wextra", "-Werror" }
+        buildoptions { "-Wall", "-Werror" }
 
-        includedirs { "include" }
+        includedirs { "include", "src/includes" }
         files { "src/**.cpp" }
 
     project "test-setup"
@@ -29,4 +29,4 @@ workspace "template"
 
         includedirs { "include" }
         files { "tests/setup.cpp" }
-        links { "glfw", "vulkan", "vk-engine" }
+        links { "fmt", "glfw", "vulkan", "vk-engine" }
