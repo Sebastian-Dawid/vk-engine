@@ -1,19 +1,6 @@
 #include <vk-engine.h>
 #include <vk-images.h>
-#include <fmt/core.h>
-#include <fmt/color.h>
-
-#define ERROR_FMT(val) fmt::styled(val, fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red))
-#define WARN_FMT(val) fmt::styled(val, fmt::emphasis::bold | fmt::fg(fmt::terminal_color::yellow))
-#define VERBOSE_FMT(val) fmt::styled(val, fmt::emphasis::bold | fmt::fg(fmt::terminal_color::cyan))
-
-#define VALIDATION_FMT(val) fmt::styled(val, fmt::emphasis::bold | fmt::fg(fmt::terminal_color::magenta))
-#define PERFORMANCE_FMT(val) fmt::styled(val, fmt::emphasis::bold | fmt::fg(fmt::terminal_color::yellow))
-#define GENERAL_FMT(val) fmt::styled(val, fmt::emphasis::bold | fmt::fg(fmt::terminal_color::blue))
-
-#ifndef DEBUG
-#define DEBUG
-#endif
+#include <error_fmt.h>
 
 void deletion_queue_t::push_function(std::function<void()>&& function)
 {
@@ -87,11 +74,16 @@ bool engine_t::run()
 
 void engine_t::draw_background(vk::CommandBuffer cmd)
 {
+    /*
     float flash = std::abs(sin(this->frame_count / 120.f));
     vk::ClearColorValue clear_value(std::array<float, 4>{ 0.f, 0.f, flash, 1.f });
 
     vk::ImageSubresourceRange clear_range(vk::ImageAspectFlagBits::eColor, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS);
     cmd.clearColorImage(this->draw_image.image, vk::ImageLayout::eGeneral, clear_value, clear_range);
+    */
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.pipeline);
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.layout, 0, this->draw_descriptor.set, {});
+    cmd.dispatch(std::ceil(this->draw_image.extent.width / 16.0), std::ceil(this->draw_image.extent.height / 16.0), 1);
 }
 
 bool engine_t::draw()
@@ -136,12 +128,13 @@ bool engine_t::draw()
 
     this->draw_background(cmd);
     
-    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
+    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal);
     vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
     
     vkutil::copy_image_to_image(cmd, this->draw_image.image, this->swapchain.images[swapchain_img_idx], this->draw_extent, this->swapchain.extent);
-    
+
     vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
+
 
     if (result = cmd.end(); result != vk::Result::eSuccess)
     {
@@ -189,6 +182,8 @@ bool engine_t::init_vulkan()
             fmt::print(fd, "[ {} ]\t", WARN_FMT(severity));
         if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
             fmt::print(fd, "[ {} ]\t", VERBOSE_FMT(severity));
+        if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+            fmt::print(fd, "[ {} ]\t", INFO_FMT(severity));
 
         if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT) fmt::print(fd, "[ {} ]\t", GENERAL_FMT(type));
         if (messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) fmt::print(fd, "[ {} ]\t", PERFORMANCE_FMT(type));
@@ -204,6 +199,9 @@ bool engine_t::init_vulkan()
         .set_app_name("test")
 #ifdef DEBUG
         .set_debug_messenger_severity(VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+#ifdef INFO_LAYERS
+                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+#endif
                 | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
                 | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
         .set_debug_messenger_type(VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
@@ -218,7 +216,7 @@ bool engine_t::init_vulkan()
     if (!inst_ret)
     {
         fmt::print(stderr, "[ {} ]\tInstance creation failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
+                ERROR_FMT("ERROR"),
                 inst_ret.error().message());
         return false;
     }
@@ -244,9 +242,7 @@ bool engine_t::init_vulkan()
 
     if (!phys_ret)
     {
-        fmt::print(stderr, "[ {} ]\tPhysical device selection failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                phys_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tPhysical device selection failed with error: {}\n", ERROR_FMT("ERROR"), phys_ret.error().message());
         return false;
     }
 
@@ -255,9 +251,7 @@ bool engine_t::init_vulkan()
     vkb::Result<vkb::Device> dev_ret = device_builder.build();
     if (!dev_ret)
     {
-        fmt::print(stderr, "[ {} ]\tDevice creation failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                dev_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tDevice creation failed with error: {}\n", ERROR_FMT("ERROR"), dev_ret.error().message());
         return false;
     }
 
@@ -267,18 +261,14 @@ bool engine_t::init_vulkan()
     vkb::Result<VkQueue> gq_ret = vkb_device.get_queue(vkb::QueueType::graphics);
     if (!gq_ret)
     {
-        fmt::print(stderr, "[ {} ]\tGetting graphics queue failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                gq_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tGetting graphics queue failed with error: {}\n", ERROR_FMT("ERROR"), gq_ret.error().message());
         return false;
     }
     this->device.graphics.queue = vk::Queue(gq_ret.value());
     vkb::Result<std::uint32_t> gqi_ret = vkb_device.get_queue_index(vkb::QueueType::graphics);
     if (!gqi_ret)
     {
-        fmt::print(stderr, "[ {} ]\tGetting graphics queue family failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                gqi_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tGetting graphics queue family failed with error: {}\n", ERROR_FMT("ERROR"), gqi_ret.error().message());
         return false;
     }
     this->device.graphics.family_index = gqi_ret.value();
@@ -286,18 +276,14 @@ bool engine_t::init_vulkan()
     vkb::Result<VkQueue> pq_ret = vkb_device.get_queue(vkb::QueueType::present);
     if (!pq_ret)
     {
-        fmt::print(stderr, "[ {} ]\tGetting present queue failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                pq_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tGetting present queue failed with error: {}\n", ERROR_FMT("ERROR"), pq_ret.error().message());
         return false;
     }
     this->device.present.queue = vk::Queue(pq_ret.value());
     vkb::Result<std::uint32_t> pqi_ret = vkb_device.get_queue_index(vkb::QueueType::present);
     if (!gqi_ret)
     {
-        fmt::print(stderr, "[ {} ]\tGetting present queue family failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                pqi_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tGetting present queue family failed with error: {}\n", ERROR_FMT("ERROR"), pqi_ret.error().message());
         return false;
     }
     this->device.present.family_index = gqi_ret.value();
@@ -328,8 +314,7 @@ bool engine_t::init_vulkan()
     std::tie(result, this->draw_image.view) = this->device.dev.createImageView(rview_info);
     if (result != vk::Result::eSuccess)
     {
-        fmt::print(stderr, "[ {} ]\tCreating render image view failed.\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)));
+        fmt::print(stderr, "[ {} ]\tCreating render image view failed.\n", ERROR_FMT("ERROR"));
         return false;
     }
 
@@ -340,6 +325,8 @@ bool engine_t::init_vulkan()
 
     if (!this->init_commands()) return false;
     if (!this->init_sync_structures()) return false;
+    if (!this->init_descriptors()) return false;
+    if (!this->init_pipelines()) return false;
 
     this->initialized = true;
     return true;
@@ -399,6 +386,69 @@ bool engine_t::init_sync_structures()
     return true;
 }
 
+bool engine_t::init_descriptors()
+{
+    std::vector<descriptor_allocator_t::pool_size_ratio_t> sizes = { { vk::DescriptorType::eStorageImage, 1 } };
+    this->global_descriptor_allocator.init_pool(this->device.dev, 10, sizes);
+    {
+        descriptor_layout_builder_t builder;
+        auto ret = builder.add_binding(0, vk::DescriptorType::eStorageImage).build(this->device.dev, vk::ShaderStageFlagBits::eCompute);
+        if (!ret.has_value()) return false;
+        this->draw_descriptor.layout = ret.value();
+    }
+
+    auto ret = this->global_descriptor_allocator.allocate(this->device.dev, this->draw_descriptor.layout);
+    if (!ret.has_value()) return false;
+    this->draw_descriptor.set = ret.value();
+
+    vk::DescriptorImageInfo img_info({}, this->draw_image.view, vk::ImageLayout::eGeneral);
+    vk::WriteDescriptorSet draw_img_write(this->draw_descriptor.set, 0, {}, 1, vk::DescriptorType::eStorageImage, &img_info);
+    this->device.dev.updateDescriptorSets(draw_img_write, {});
+
+    this->main_deletion_queue.push_function([&]() {
+            this->device.dev.destroyDescriptorSetLayout(this->draw_descriptor.layout);
+            this->global_descriptor_allocator.destroy_pool(this->device.dev);
+            });
+
+    return true;
+}
+
+bool engine_t::init_pipelines()
+{
+    return this->init_background_pipelines();
+}
+
+bool engine_t::init_background_pipelines()
+{
+    vk::Result result;
+    vk::PipelineLayoutCreateInfo compute_layout({}, this->draw_descriptor.layout);
+    std::tie(result, this->gradient_pipeline.layout) = this->device.dev.createPipelineLayout(compute_layout);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create pipeline layout!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    auto compute_draw_shader = vkutil::load_shader_module("tests/build/shaders/gradient.comp.spv", this->device.dev);
+    if (!compute_draw_shader.has_value()) return false;
+    vk::PipelineShaderStageCreateInfo stage_info({}, vk::ShaderStageFlagBits::eCompute, compute_draw_shader.value(), "main");
+    vk::ComputePipelineCreateInfo pipeline_info({}, stage_info, this->gradient_pipeline.layout);
+    std::tie(result, this->gradient_pipeline.pipeline) = this->device.dev.createComputePipeline({}, pipeline_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create compute pipeline!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    this->device.dev.destroyShaderModule(compute_draw_shader.value());
+    this->main_deletion_queue.push_function([&]() {
+            this->device.dev.destroyPipelineLayout(this->gradient_pipeline.layout);
+            this->device.dev.destroyPipeline(this->gradient_pipeline.pipeline);
+            });
+
+    return true;
+}
+
 bool engine_t::create_swapchain(std::uint32_t width, std::uint32_t height)
 {
     vkb::SwapchainBuilder builder{this->physical_device, this->device.dev, this->window.surface};
@@ -413,9 +463,7 @@ bool engine_t::create_swapchain(std::uint32_t width, std::uint32_t height)
 
     if (!sc_ret)
     {
-        fmt::print(stderr, "[ {} ]\tCreating swapchain failed with error: {}\n",
-                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)),
-                sc_ret.error().message());
+        fmt::print(stderr, "[ {} ]\tCreating swapchain failed with error: {}\n", ERROR_FMT("ERROR"), sc_ret.error().message());
         return false;
     }
 

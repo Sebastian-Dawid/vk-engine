@@ -8,6 +8,8 @@
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
 #include <vk-types.h>
+#include <vk-descriptors.h>
+#include <vk-pipelines.h>
 
 struct deletion_queue_t
 {
@@ -75,9 +77,25 @@ struct engine_t
 
     deletion_queue_t main_deletion_queue;
 
+    descriptor_allocator_t global_descriptor_allocator;
+    struct
+    {
+        vk::DescriptorSet set;
+        vk::DescriptorSetLayout layout;
+    } draw_descriptor;
+
+    struct
+    {
+        vk::Pipeline pipeline;
+        vk::PipelineLayout layout;
+    } gradient_pipeline;
+
     bool init_vulkan();
     bool init_commands();
     bool init_sync_structures();
+    bool init_descriptors();
+    bool init_pipelines();
+    bool init_background_pipelines();
 
     bool create_swapchain(std::uint32_t width, std::uint32_t height);
     void destroy_swapchain();

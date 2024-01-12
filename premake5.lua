@@ -12,6 +12,7 @@ workspace "template"
         defines { "NDEBUG" }
         optimize "On"
 
+
     project "vk-engine"
         kind "StaticLib"
         language "C++"
@@ -31,6 +32,13 @@ workspace "template"
         location "tests/build"
         targetdir "tests/build/bin/%{cfg.buildcfg}"
 
+        filter "files:**.comp or **.vert or **.frag"
+            buildmessage '%{file.name}'
+            buildcommands { 'mkdir -p shaders', '"glslc" -o "shaders/%{file.name}.spv" "%{file.relpath}"' }
+            buildoutputs { "shaders/%{file.name}.spv" }
+
+        filter {}
+
         includedirs { "include" }
-        files { "tests/setup.cpp" }
+        files { "tests/setup.cpp", "tests/shaders/**" }
         links { "fmt", "glfw", "vulkan", "vk-engine" }
