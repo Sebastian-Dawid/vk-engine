@@ -18,6 +18,10 @@ workspace "template"
         targetdir "build/lib/%{cfg.buildcfg}"
         buildoptions { "-Wall", "-Werror" }
 
+        filter "files:src/vk-mem-alloc/vk_mem_alloc.cpp"
+            buildoptions { "-w" }
+        filter {}
+
         includedirs { "include", "src/includes" }
         files { "src/**.cpp" }
 

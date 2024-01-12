@@ -15,6 +15,20 @@
 #define DEBUG
 #endif
 
+void deletion_queue_t::push_function(std::function<void()>&& function)
+{
+    this->deletors.push_back(function);
+}
+
+void deletion_queue_t::flush()
+{
+    for (auto it = this->deletors.rbegin(); it != this->deletors.rend(); ++it)
+    {
+        (*it)();
+    }
+    this->deletors.clear();
+}
+
 engine_t::engine_t()
 {
     glfwInit();
@@ -38,6 +52,8 @@ engine_t::~engine_t()
             fmt::print(stderr, "[ {} ]\tWaiting on device to finish failed!\n", ERROR_FMT("ERROR"));
             abort();
         }
+
+        this->main_deletion_queue.flush();
 
         for (std::size_t i = 0; i < FRAME_OVERLAP; ++i)
         {
@@ -69,6 +85,15 @@ bool engine_t::run()
     return true;
 }
 
+void engine_t::draw_background(vk::CommandBuffer cmd)
+{
+    float flash = std::abs(sin(this->frame_count / 120.f));
+    vk::ClearColorValue clear_value(std::array<float, 4>{ 0.f, 0.f, flash, 1.f });
+
+    vk::ImageSubresourceRange clear_range(vk::ImageAspectFlagBits::eColor, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS);
+    cmd.clearColorImage(this->draw_image.image, vk::ImageLayout::eGeneral, clear_value, clear_range);
+}
+
 bool engine_t::draw()
 {
     vk::Result result = this->device.dev.waitForFences(this->get_current_frame().render_fence, true, 1000000000);
@@ -98,6 +123,8 @@ bool engine_t::draw()
         return false;
     }
 
+    this->draw_extent.width = this->draw_image.extent.width;
+    this->draw_extent.height = this->draw_image.extent.height;
     vk::CommandBufferBeginInfo begin_info(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     if (result = cmd.begin(&begin_info); result != vk::Result::eSuccess)
     {
@@ -105,13 +132,16 @@ bool engine_t::draw()
         return false;
     }
 
-    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
-    float flash = std::abs(sin(this->frame_count / 120.f));
-    vk::ClearColorValue clear_value(std::array<float, 4>{ 0.f, 0.f, flash, 1.f });
+    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
 
-    vk::ImageSubresourceRange clear_range(vk::ImageAspectFlagBits::eColor, 0, vk::RemainingMipLevels, 0, vk::RemainingArrayLayers);
-    cmd.clearColorImage(this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eGeneral, clear_value, clear_range);
-    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eGeneral, vk::ImageLayout::ePresentSrcKHR);
+    this->draw_background(cmd);
+    
+    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
+    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+    
+    vkutil::copy_image_to_image(cmd, this->draw_image.image, this->swapchain.images[swapchain_img_idx], this->draw_extent, this->swapchain.extent);
+    
+    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
 
     if (result = cmd.end(); result != vk::Result::eSuccess)
     {
@@ -272,7 +302,42 @@ bool engine_t::init_vulkan()
     }
     this->device.present.family_index = gqi_ret.value();
 
+    VmaAllocatorCreateInfo allocator_info = {};
+    allocator_info.physicalDevice = this->physical_device;
+    allocator_info.device = this->device.dev;
+    allocator_info.instance = this->instance;
+    allocator_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    vmaCreateAllocator(&allocator_info, &this->allocator);
+
+    this->main_deletion_queue.push_function([&]() { vmaDestroyAllocator(this->allocator); });
+
     if (!this->create_swapchain(this->window.width, this->window.height)) return false;
+
+    this->draw_image.extent = vk::Extent3D(this->window.width, this->window.height, 1);
+    this->draw_image.format = vk::Format::eR16G16B16A16Sfloat;
+    vk::ImageCreateInfo rimg_info({}, vk::ImageType::e2D, this->draw_image.format, this->draw_image.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eColorAttachment);
+    VmaAllocationCreateInfo rimg_alloc_info = {};
+    rimg_alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    rimg_alloc_info.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vmaCreateImage(this->allocator, (VkImageCreateInfo*)&rimg_info, &rimg_alloc_info, (VkImage*)&this->draw_image.image, &this->draw_image.allocation, nullptr);
+
+    vk::ImageViewCreateInfo rview_info({}, this->draw_image.image, vk::ImageViewType::e2D, this->draw_image.format, {},
+            vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+    vk::Result result;
+    std::tie(result, this->draw_image.view) = this->device.dev.createImageView(rview_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tCreating render image view failed.\n",
+                fmt::styled("ERROR", fmt::emphasis::bold | fmt::fg(fmt::terminal_color::red)));
+        return false;
+    }
+
+    this->main_deletion_queue.push_function([=, this]() {
+            this->device.dev.destroyImageView(this->draw_image.view);
+            vmaDestroyImage(this->allocator, (VkImage)this->draw_image.image, this->draw_image.allocation);
+            });
+
     if (!this->init_commands()) return false;
     if (!this->init_sync_structures()) return false;
 
@@ -337,7 +402,7 @@ bool engine_t::init_sync_structures()
 bool engine_t::create_swapchain(std::uint32_t width, std::uint32_t height)
 {
     vkb::SwapchainBuilder builder{this->physical_device, this->device.dev, this->window.surface};
-    this->swapchain.format = vk::Format::eB8G8R8A8Srgb;
+    this->swapchain.format = vk::Format::eB8G8R8A8Unorm;
 
     vkb::Result<vkb::Swapchain> sc_ret = builder
         .set_desired_format((VkSurfaceFormatKHR)vk::SurfaceFormatKHR(this->swapchain.format, vk::ColorSpaceKHR::eSrgbNonlinear))
