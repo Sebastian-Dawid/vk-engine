@@ -90,12 +90,20 @@ struct engine_t
         vk::PipelineLayout layout;
     } gradient_pipeline;
 
+    struct
+    {
+        vk::Fence fence;
+        vk::CommandBuffer cmd;
+        vk::CommandPool pool;
+    } imm_submit;
+
     bool init_vulkan();
     bool init_commands();
     bool init_sync_structures();
     bool init_descriptors();
     bool init_pipelines();
     bool init_background_pipelines();
+    bool init_imgui();
 
     bool create_swapchain(std::uint32_t width, std::uint32_t height);
     void destroy_swapchain();
@@ -103,8 +111,11 @@ struct engine_t
     frame_data_t& get_current_frame();
 
     void draw_background(vk::CommandBuffer cmd);
+    void draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view);
     bool draw();
     bool run();
+
+    bool immediate_submit(std::function<void(vk::CommandBuffer cmd)>&& function);
 
     engine_t();
     ~engine_t();

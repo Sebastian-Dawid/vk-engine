@@ -1,7 +1,7 @@
 [
     {
         "directory": "/home/sdawid/C(++)-Programms/vk-engine",
-        "arguments": ["clang++", "-std=c++20", "-I./include", "-I./src/includes", "-Wall", "-Wextra"],
+        "arguments": ["clang++", "-std=c++20", "-I./include", "-I./src/includes", "-I./imgui", "-Wall", "-Wextra"],
         "file": "main.cpp"
     }
 ]

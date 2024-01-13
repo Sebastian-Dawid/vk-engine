@@ -2,6 +2,10 @@
 #include <vk-images.h>
 #include <error_fmt.h>
 
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
+
 void deletion_queue_t::push_function(std::function<void()>&& function)
 {
     this->deletors.push_back(function);
@@ -66,6 +70,13 @@ bool engine_t::run()
     {
         glfwPollEvents();
         if (glfwGetKey(this->window.win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(this->window.win, GLFW_TRUE);
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        ImGui::ShowDemoWindow();
+        ImGui::Render();
+
         if (!draw()) return false;
     }
 
@@ -74,16 +85,18 @@ bool engine_t::run()
 
 void engine_t::draw_background(vk::CommandBuffer cmd)
 {
-    /*
-    float flash = std::abs(sin(this->frame_count / 120.f));
-    vk::ClearColorValue clear_value(std::array<float, 4>{ 0.f, 0.f, flash, 1.f });
-
-    vk::ImageSubresourceRange clear_range(vk::ImageAspectFlagBits::eColor, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS);
-    cmd.clearColorImage(this->draw_image.image, vk::ImageLayout::eGeneral, clear_value, clear_range);
-    */
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.pipeline);
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.layout, 0, this->draw_descriptor.set, {});
     cmd.dispatch(std::ceil(this->draw_image.extent.width / 16.0), std::ceil(this->draw_image.extent.height / 16.0), 1);
+}
+
+void engine_t::draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view)
+{
+    vk::RenderingAttachmentInfo color_attachment(target_image_view, vk::ImageLayout::eGeneral);
+    vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->swapchain.extent }, 1, {}, color_attachment);
+    cmd.beginRendering(render_info);
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+    cmd.endRendering();
 }
 
 bool engine_t::draw()
@@ -133,8 +146,11 @@ bool engine_t::draw()
     
     vkutil::copy_image_to_image(cmd, this->draw_image.image, this->swapchain.images[swapchain_img_idx], this->draw_extent, this->swapchain.extent);
 
-    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
-
+    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eColorAttachmentOptimal);
+    
+    this->draw_imgui(cmd, this->swapchain.views[swapchain_img_idx]);
+    
+    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
 
     if (result = cmd.end(); result != vk::Result::eSuccess)
     {
@@ -327,6 +343,7 @@ bool engine_t::init_vulkan()
     if (!this->init_sync_structures()) return false;
     if (!this->init_descriptors()) return false;
     if (!this->init_pipelines()) return false;
+    if (!this->init_imgui()) return false;
 
     this->initialized = true;
     return true;
@@ -336,6 +353,7 @@ bool engine_t::init_commands()
 {
     vk::CommandPoolCreateInfo pool_info(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, this->device.graphics.family_index);
     vk::Result result;
+        std::vector<vk::CommandBuffer> buf;
     for (std::size_t i = 0; i < FRAME_OVERLAP; ++i)
     {
         std::tie(result, this->frames[i].pool) = this->device.dev.createCommandPool(pool_info);
@@ -345,7 +363,6 @@ bool engine_t::init_commands()
             return false;
         }
         vk::CommandBufferAllocateInfo alloc_info(this->frames[i].pool, vk::CommandBufferLevel::ePrimary, 1);
-        std::vector<vk::CommandBuffer> buf;
         std::tie(result, buf) = this->device.dev.allocateCommandBuffers(alloc_info);
         if (result != vk::Result::eSuccess)
         {
@@ -354,6 +371,26 @@ bool engine_t::init_commands()
         }
         this->frames[i].buffer = buf[0];
     }
+
+    std::tie(result, this->imm_submit.pool) = this->device.dev.createCommandPool(pool_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create command pool!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    vk::CommandBufferAllocateInfo cmd_alloc_info(this->imm_submit.pool, vk::CommandBufferLevel::ePrimary, 1);
+    std::tie(result, buf) = this->device.dev.allocateCommandBuffers(cmd_alloc_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create command buffer!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    this->imm_submit.cmd = buf[0];
+
+    this->main_deletion_queue.push_function([=, this]() {
+            this->device.dev.destroyCommandPool(this->imm_submit.pool);
+            });
+
     return true;
 }
 
@@ -383,6 +420,15 @@ bool engine_t::init_sync_structures()
             return false;
         }
     }
+    
+    std::tie(result, this->imm_submit.fence) = this->device.dev.createFence(fence_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create fence!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    this->main_deletion_queue.push_function([=, this]() { this->device.dev.destroyFence(this->imm_submit.fence); });
+
     return true;
 }
 
@@ -445,6 +491,102 @@ bool engine_t::init_background_pipelines()
             this->device.dev.destroyPipelineLayout(this->gradient_pipeline.layout);
             this->device.dev.destroyPipeline(this->gradient_pipeline.pipeline);
             });
+
+    return true;
+}
+
+bool engine_t::init_imgui()
+{
+    vk::DescriptorPoolSize pool_sizes[] = {
+        { vk::DescriptorType::eSampler, 1000 },
+        { vk::DescriptorType::eCombinedImageSampler, 1000 },
+        { vk::DescriptorType::eSampledImage, 1000 },
+        { vk::DescriptorType::eStorageImage, 1000 },
+        { vk::DescriptorType::eUniformTexelBuffer, 1000 },
+        { vk::DescriptorType::eStorageTexelBuffer, 1000 },
+        { vk::DescriptorType::eUniformBuffer, 1000 },
+        { vk::DescriptorType::eStorageBuffer, 1000 },
+        { vk::DescriptorType::eUniformBufferDynamic, 1000 },
+        { vk::DescriptorType::eStorageBufferDynamic, 1000 },
+        { vk::DescriptorType::eInputAttachment, 1000 },
+    };
+
+    vk::DescriptorPoolCreateInfo pool_info(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1000, pool_sizes);
+    auto [result, imgui_pool] = this->device.dev.createDescriptorPool(pool_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create imgui descriptor pool!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    ImGui::CreateContext();
+    ImGui_ImplGlfw_InitForVulkan(this->window.win, true);
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = this->instance;
+    init_info.PhysicalDevice = this->physical_device;
+    init_info.Device = this->device.dev;
+    init_info.Queue = this->device.graphics.queue;
+    init_info.DescriptorPool = imgui_pool;
+    init_info.MinImageCount = 3;
+    init_info.ImageCount = 3;
+    init_info.UseDynamicRendering = true;
+    init_info.ColorAttachmentFormat = (VkFormat)this->swapchain.format;
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+    ImGui_ImplVulkan_Init(&init_info, VK_NULL_HANDLE);
+    if (!this->immediate_submit([&](vk::CommandBuffer cmd) { ImGui_ImplVulkan_CreateFontsTexture(); })) return false;
+
+    ImGui_ImplVulkan_DestroyFontsTexture();
+
+    this->main_deletion_queue.push_function([=, this]() {
+            ImGui_ImplVulkan_Shutdown();
+            this->device.dev.destroyDescriptorPool(imgui_pool);
+            });
+
+    return true;
+}
+
+bool engine_t::immediate_submit(std::function<void(vk::CommandBuffer cmd)>&& function)
+{
+    vk::Result result = this->device.dev.resetFences(this->imm_submit.fence);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to reset fence!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    if (result = this->imm_submit.cmd.reset(); result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to reset command buffer!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    vk::CommandBufferBeginInfo begin_info(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+    if (result = this->imm_submit.cmd.begin(begin_info); result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to begin recording command buffer!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    function(this->imm_submit.cmd);
+    if (result = this->imm_submit.cmd.end(); result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to end recording command buffer!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    vk::CommandBufferSubmitInfo cmd_info(this->imm_submit.cmd);
+    vk::SubmitInfo2 submit_info({}, {}, cmd_info);
+
+    if (result = this->device.graphics.queue.submit2(submit_info, this->imm_submit.fence); result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to submit command buffer!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    if (result = this->device.dev.waitForFences(this->imm_submit.fence, true, 9999999999); result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to wait for fences!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
 
     return true;
 }

@@ -12,6 +12,13 @@ workspace "template"
         defines { "NDEBUG" }
         optimize "On"
 
+    project "imgui"
+        kind "StaticLib"
+        language "C++"
+        targetdir "build/lib/%{cfg.buildcfg}"
+
+        includedirs { "imgui", "imgui/backends" }
+        files  { "imgui/*.cpp", "imgui/backends/imgui_impl_vulkan.cpp", "imgui/backends/imgui_impl_glfw.cpp" }
 
     project "vk-engine"
         kind "StaticLib"
@@ -23,7 +30,7 @@ workspace "template"
             buildoptions { "-w" }
         filter {}
 
-        includedirs { "include", "src/includes" }
+        includedirs { "include", "src/includes", "imgui" }
         files { "src/**.cpp" }
 
     project "test-setup"
@@ -41,4 +48,4 @@ workspace "template"
 
         includedirs { "include" }
         files { "tests/setup.cpp", "tests/shaders/**" }
-        links { "fmt", "glfw", "vulkan", "vk-engine" }
+        links { "fmt", "glfw", "vulkan", "vk-engine", "imgui" }
