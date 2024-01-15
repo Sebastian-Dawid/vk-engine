@@ -74,7 +74,20 @@ bool engine_t::run()
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::ShowDemoWindow();
+        if (ImGui::Begin("background"))
+        {
+            compute_effect_t& selected = this->background_effects[this->current_bg_effect];
+            ImGui::Text("Selected effect: %s", selected.name);
+            ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
+
+            ImGui::InputFloat4("data1", (float*) &selected.data.data1);
+            ImGui::InputFloat4("data2", (float*) &selected.data.data2);
+            ImGui::InputFloat4("data3", (float*) &selected.data.data3);
+            ImGui::InputFloat4("data4", (float*) &selected.data.data4);
+
+            ImGui::End();
+        }
+        //ImGui::ShowDemoWindow();
         ImGui::Render();
 
         if (!draw()) return false;
@@ -85,8 +98,11 @@ bool engine_t::run()
 
 void engine_t::draw_background(vk::CommandBuffer cmd)
 {
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.pipeline);
+    compute_effect_t& selected = this->background_effects[this->current_bg_effect];
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, selected.pipeline);
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.layout, 0, this->draw_descriptor.set, {});
+
+    cmd.pushConstants(this->gradient_pipeline.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(selected.data), &selected.data);
     cmd.dispatch(std::ceil(this->draw_image.extent.width / 16.0), std::ceil(this->draw_image.extent.height / 16.0), 1);
 }
 
@@ -467,7 +483,8 @@ bool engine_t::init_pipelines()
 bool engine_t::init_background_pipelines()
 {
     vk::Result result;
-    vk::PipelineLayoutCreateInfo compute_layout({}, this->draw_descriptor.layout);
+    vk::PushConstantRange push_constant(vk::ShaderStageFlagBits::eCompute, 0, sizeof(compute_push_constants_t));
+    vk::PipelineLayoutCreateInfo compute_layout({}, this->draw_descriptor.layout, push_constant);
     std::tie(result, this->gradient_pipeline.layout) = this->device.dev.createPipelineLayout(compute_layout);
     if (result != vk::Result::eSuccess)
     {
@@ -475,21 +492,45 @@ bool engine_t::init_background_pipelines()
         return false;
     }
 
-    auto compute_draw_shader = vkutil::load_shader_module("tests/build/shaders/gradient.comp.spv", this->device.dev);
-    if (!compute_draw_shader.has_value()) return false;
-    vk::PipelineShaderStageCreateInfo stage_info({}, vk::ShaderStageFlagBits::eCompute, compute_draw_shader.value(), "main");
+    auto gradient_shader = vkutil::load_shader_module("tests/build/shaders/gradient_color.comp.spv", this->device.dev);
+    if (!gradient_shader.has_value()) return false;
+    auto sky_shader = vkutil::load_shader_module("tests/build/shaders/sky.comp.spv", this->device.dev);
+    if (!sky_shader.has_value()) return false;
+
+    compute_effect_t gradient{ .name = "gradient", .layout = this->gradient_pipeline.layout };
+    gradient.data.data1 = glm::vec4(1, 0, 0, 1);
+    gradient.data.data2 = glm::vec4(0, 0, 1, 1);
+
+    vk::PipelineShaderStageCreateInfo stage_info({}, vk::ShaderStageFlagBits::eCompute, gradient_shader.value(), "main");
     vk::ComputePipelineCreateInfo pipeline_info({}, stage_info, this->gradient_pipeline.layout);
-    std::tie(result, this->gradient_pipeline.pipeline) = this->device.dev.createComputePipeline({}, pipeline_info);
+    std::tie(result, gradient.pipeline) = this->device.dev.createComputePipeline({}, pipeline_info);
     if (result != vk::Result::eSuccess)
     {
         fmt::print(stderr, "[ {} ]\tFailed to create compute pipeline!\n", ERROR_FMT("ERROR"));
         return false;
     }
 
-    this->device.dev.destroyShaderModule(compute_draw_shader.value());
+    compute_effect_t sky{ .name = "sky", .layout = this->gradient_pipeline.layout };
+    sky.data.data1 = glm::vec4(0.1, 0.2, 0.4, 0.97);
+
+    stage_info.setModule(sky_shader.value());
+    pipeline_info.setStage(stage_info);
+    std::tie(result, sky.pipeline) = this->device.dev.createComputePipeline({}, pipeline_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create compute pipeline!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    this->background_effects.push_back(gradient);
+    this->background_effects.push_back(sky);
+
+    this->device.dev.destroyShaderModule(sky_shader.value());
+    this->device.dev.destroyShaderModule(gradient_shader.value());
     this->main_deletion_queue.push_function([&]() {
             this->device.dev.destroyPipelineLayout(this->gradient_pipeline.layout);
-            this->device.dev.destroyPipeline(this->gradient_pipeline.pipeline);
+            for (auto& e : this->background_effects)
+                this->device.dev.destroyPipeline(e.pipeline);
             });
 
     return true;

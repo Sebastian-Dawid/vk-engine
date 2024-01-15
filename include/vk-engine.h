@@ -11,6 +11,24 @@
 #include <vk-descriptors.h>
 #include <vk-pipelines.h>
 
+#include <glm/glm.hpp>
+
+struct compute_push_constants_t
+{
+    glm::vec4 data1;
+    glm::vec4 data2;
+    glm::vec4 data3;
+    glm::vec4 data4;
+};
+
+struct compute_effect_t
+{
+    const char* name;
+    vk::Pipeline pipeline;
+    vk::PipelineLayout layout;
+    compute_push_constants_t data;
+};
+
 struct deletion_queue_t
 {
     std::vector<std::function<void()>> deletors;
@@ -96,6 +114,9 @@ struct engine_t
         vk::CommandBuffer cmd;
         vk::CommandPool pool;
     } imm_submit;
+
+    std::vector<compute_effect_t> background_effects;
+    std::uint32_t current_bg_effect = 0;
 
     bool init_vulkan();
     bool init_commands();
