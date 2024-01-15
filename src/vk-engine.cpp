@@ -96,6 +96,20 @@ bool engine_t::run()
     return true;
 }
 
+void engine_t::draw_geometry(vk::CommandBuffer cmd)
+{
+    vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
+    vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment);
+    cmd.beginRendering(render_info);
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, this->triangle_pipeline.pipeline);
+    vk::Viewport viewport(0, 0, this->draw_extent.width, this->draw_extent.height, 0, 1);
+    cmd.setViewport(0, viewport);
+    vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
+    cmd.setScissor(0, scissor);
+    cmd.draw(3, 1, 0, 0);
+    cmd.endRendering();
+}
+
 void engine_t::draw_background(vk::CommandBuffer cmd)
 {
     compute_effect_t& selected = this->background_effects[this->current_bg_effect];
@@ -157,7 +171,11 @@ bool engine_t::draw()
 
     this->draw_background(cmd);
     
-    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal);
+    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eColorAttachmentOptimal);
+
+    this->draw_geometry(cmd);
+
+    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
     vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
     
     vkutil::copy_image_to_image(cmd, this->draw_image.image, this->swapchain.images[swapchain_img_idx], this->draw_extent, this->swapchain.extent);
@@ -477,7 +495,47 @@ bool engine_t::init_descriptors()
 
 bool engine_t::init_pipelines()
 {
+    if (!this->init_triangle_pipelines()) return false;
     return this->init_background_pipelines();
+}
+
+bool engine_t::init_triangle_pipelines()
+{
+    auto triangle_frag_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle.frag.spv", this->device.dev);
+    if (!triangle_frag_shader.has_value()) return false;
+    auto triangle_vert_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle.vert.spv", this->device.dev);
+    if (!triangle_vert_shader.has_value()) return false;
+    vk::PipelineLayoutCreateInfo pipeline_layout_info;
+    vk::Result result;
+    std::tie(result, this->triangle_pipeline.layout) = this->device.dev.createPipelineLayout(pipeline_layout_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create pipeline layout!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    pipeline_builder_t pipeline_builder;
+    pipeline_builder.pipeline_layout = this->triangle_pipeline.layout;
+    pipeline_builder.set_shaders(triangle_vert_shader.value(), triangle_frag_shader.value())
+        .set_input_topology(vk::PrimitiveTopology::eTriangleList)
+        .set_polygon_mode(vk::PolygonMode::eFill)
+        .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
+        .set_multisampling_none()
+        .disable_blending()
+        .disable_depthtest()
+        .set_color_attachment_format(this->draw_image.format)
+        .set_depth_format(vk::Format::eUndefined);
+    this->triangle_pipeline.pipeline = pipeline_builder.build(this->device.dev);
+    if (this->triangle_pipeline.pipeline == nullptr) return false;
+    
+    this->device.dev.destroyShaderModule(triangle_vert_shader.value());
+    this->device.dev.destroyShaderModule(triangle_frag_shader.value());
+
+    this->main_deletion_queue.push_function([=, this]{
+            this->device.dev.destroyPipelineLayout(this->triangle_pipeline.layout);
+            this->device.dev.destroyPipeline(this->triangle_pipeline.pipeline);
+            });
+
+    return true;
 }
 
 bool engine_t::init_background_pipelines()

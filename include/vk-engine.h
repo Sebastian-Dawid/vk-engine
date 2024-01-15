@@ -115,6 +115,12 @@ struct engine_t
         vk::CommandPool pool;
     } imm_submit;
 
+    struct
+    {
+        vk::Pipeline pipeline;
+        vk::PipelineLayout layout;
+    } triangle_pipeline;
+
     std::vector<compute_effect_t> background_effects;
     std::uint32_t current_bg_effect = 0;
 
@@ -123,6 +129,7 @@ struct engine_t
     bool init_sync_structures();
     bool init_descriptors();
     bool init_pipelines();
+    bool init_triangle_pipelines();
     bool init_background_pipelines();
     bool init_imgui();
 
@@ -131,6 +138,7 @@ struct engine_t
 
     frame_data_t& get_current_frame();
 
+    void draw_geometry(vk::CommandBuffer cmd);
     void draw_background(vk::CommandBuffer cmd);
     void draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view);
     bool draw();
