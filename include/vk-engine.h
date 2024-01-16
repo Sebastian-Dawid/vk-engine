@@ -10,6 +10,7 @@
 #include <vk-types.h>
 #include <vk-descriptors.h>
 #include <vk-pipelines.h>
+#include <vk-loader.h>
 
 #include <glm/glm.hpp>
 
@@ -88,6 +89,7 @@ struct engine_t
     } swapchain;
 
     allocated_image_t draw_image;
+    allocated_image_t depth_image;
     vk::Extent2D draw_extent;
 
     frame_data_t frames[FRAME_OVERLAP];
@@ -119,15 +121,9 @@ struct engine_t
     {
         vk::Pipeline pipeline;
         vk::PipelineLayout layout;
-    } triangle_pipeline;
-
-    struct
-    {
-        vk::Pipeline pipeline;
-        vk::PipelineLayout layout;
     } mesh_pipeline;
 
-    gpu_mesh_buffer_t rectangle;
+    std::vector<std::shared_ptr<mesh_asset_t>> test_meshes;
 
     std::vector<compute_effect_t> background_effects;
     std::uint32_t current_bg_effect = 0;
@@ -138,7 +134,6 @@ struct engine_t
     bool init_descriptors();
     bool init_pipelines();
     bool init_mesh_pipeline();
-    bool init_triangle_pipelines();
     bool init_background_pipelines();
     bool init_imgui();
 

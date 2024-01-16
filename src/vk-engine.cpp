@@ -6,6 +6,8 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 
+#include <glm/gtx/transform.hpp>
+
 void deletion_queue_t::push_function(std::function<void()>&& function)
 {
     this->deletors.push_back(function);
@@ -99,20 +101,32 @@ bool engine_t::run()
 void engine_t::draw_geometry(vk::CommandBuffer cmd)
 {
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
-    vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment);
+    vk::RenderingAttachmentInfo depth_attachment(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
+            vk::AttachmentStoreOp::eStore);
+    depth_attachment.clearValue.depthStencil.depth = 0.f;
+    vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment, &depth_attachment);
     cmd.beginRendering(render_info);
-    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, this->triangle_pipeline.pipeline);
+    
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, this->mesh_pipeline.pipeline);
+    
     vk::Viewport viewport(0, 0, this->draw_extent.width, this->draw_extent.height, 0, 1);
     cmd.setViewport(0, viewport);
     vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
     cmd.setScissor(0, scissor);
-    cmd.draw(3, 1, 0, 0);
-    
-    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, this->mesh_pipeline.pipeline);
-    gpu_draw_push_constants_t push_constants = { glm::mat4{ 1.f }, this->rectangle.vertex_buffer_address };
+
+    gpu_draw_push_constants_t push_constants;
+
+    glm::mat4 model = glm::rotate(glm::radians(180.f), glm::vec3(0, 1, 0));
+    glm::mat4 view = glm::translate(glm::vec3(0, 0, -5));
+    glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)this->draw_extent.width / (float)this->draw_extent.height, .1f, 100.f);
+    projection[1][1] *= -1;
+    push_constants.world = projection * view * model;
+    push_constants.vertex_buffer = this->test_meshes[2]->mesh_buffer.vertex_buffer_address;
+
     cmd.pushConstants(this->mesh_pipeline.layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
-    cmd.bindIndexBuffer(this->rectangle.index_buffer.buffer, 0, vk::IndexType::eUint32);
-    cmd.drawIndexed(6, 1, 0, 0, 0);
+    cmd.bindIndexBuffer(this->test_meshes[2]->mesh_buffer.index_buffer.buffer, 0, vk::IndexType::eUint32);
+    cmd.drawIndexed(this->test_meshes[2]->surfaces[0].count, 1, this->test_meshes[2]->surfaces[0].start_index, 0, 0);
+
     cmd.endRendering();
 }
 
@@ -178,6 +192,7 @@ bool engine_t::draw()
     this->draw_background(cmd);
     
     vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eColorAttachmentOptimal);
+    vkutil::transition_image(cmd, this->depth_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal);
 
     this->draw_geometry(cmd);
 
@@ -221,6 +236,7 @@ bool engine_t::draw()
 
 bool engine_t::init_vulkan()
 {
+    if (this->window.win == nullptr) return false;
 #ifdef DEBUG
     auto debug_callback = [] (VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
             const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void *pUserData) -> VkBool32
@@ -374,9 +390,27 @@ bool engine_t::init_vulkan()
         return false;
     }
 
+    this->depth_image.format = vk::Format::eD32Sfloat;
+    this->depth_image.extent = this->draw_image.extent;
+    vk::ImageCreateInfo dimg_info({}, vk::ImageType::e2D, this->depth_image.format, this->depth_image.extent, 1, 1, vk::SampleCountFlagBits::e1,
+        vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eDepthStencilAttachment);
+    vmaCreateImage(this->allocator, (VkImageCreateInfo*)&dimg_info, &rimg_alloc_info, (VkImage*)&this->depth_image.image, &this->depth_image.allocation, nullptr);
+
+    vk::ImageViewCreateInfo dview_info({}, this->depth_image.image, vk::ImageViewType::e2D, this->depth_image.format, {},
+            vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1));
+    std::tie(result, this->depth_image.view) = this->device.dev.createImageView(dview_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tCreating depth image view failed.\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
     this->main_deletion_queue.push_function([=, this]() {
             this->device.dev.destroyImageView(this->draw_image.view);
             vmaDestroyImage(this->allocator, (VkImage)this->draw_image.image, this->draw_image.allocation);
+            
+            this->device.dev.destroyImageView(this->depth_image.view);
+            vmaDestroyImage(this->allocator, (VkImage)this->depth_image.image, this->depth_image.allocation);
             });
 
     if (!this->init_commands()) return false;
@@ -503,7 +537,6 @@ bool engine_t::init_descriptors()
 bool engine_t::init_pipelines()
 {
     if (!this->init_mesh_pipeline()) return false;
-    if (!this->init_triangle_pipelines()) return false;
     return this->init_background_pipelines();
 }
 
@@ -533,9 +566,9 @@ bool engine_t::init_mesh_pipeline()
         .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
         .set_multisampling_none()
         .disable_blending()
-        .disable_depthtest()
+        .enable_depthtest(true, vk::CompareOp::eGreaterOrEqual)
         .set_color_attachment_format(this->draw_image.format)
-        .set_depth_format(vk::Format::eUndefined);
+        .set_depth_format(this->depth_image.format);
 
     auto pipeline = pipeline_builder.build(this->device.dev);
     if (!pipeline.has_value()) return false;
@@ -547,46 +580,6 @@ bool engine_t::init_mesh_pipeline()
     this->main_deletion_queue.push_function([=, this](){
             this->device.dev.destroyPipelineLayout(this->mesh_pipeline.layout);
             this->device.dev.destroyPipeline(this->mesh_pipeline.pipeline);
-            });
-
-    return true;
-}
-
-bool engine_t::init_triangle_pipelines()
-{
-    auto triangle_frag_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle.frag.spv", this->device.dev);
-    if (!triangle_frag_shader.has_value()) return false;
-    auto triangle_vert_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle.vert.spv", this->device.dev);
-    if (!triangle_vert_shader.has_value()) return false;
-    vk::PipelineLayoutCreateInfo pipeline_layout_info;
-    vk::Result result;
-    std::tie(result, this->triangle_pipeline.layout) = this->device.dev.createPipelineLayout(pipeline_layout_info);
-    if (result != vk::Result::eSuccess)
-    {
-        fmt::print(stderr, "[ {} ]\tFailed to create pipeline layout!\n", ERROR_FMT("ERROR"));
-        return false;
-    }
-    pipeline_builder_t pipeline_builder;
-    pipeline_builder.pipeline_layout = this->triangle_pipeline.layout;
-    pipeline_builder.set_shaders(triangle_vert_shader.value(), triangle_frag_shader.value())
-        .set_input_topology(vk::PrimitiveTopology::eTriangleList)
-        .set_polygon_mode(vk::PolygonMode::eFill)
-        .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
-        .set_multisampling_none()
-        .disable_blending()
-        .disable_depthtest()
-        .set_color_attachment_format(this->draw_image.format)
-        .set_depth_format(vk::Format::eUndefined);
-    auto pipeline = pipeline_builder.build(this->device.dev);
-    if (!pipeline.has_value()) return false;
-    this->triangle_pipeline.pipeline = pipeline.value();
-    
-    this->device.dev.destroyShaderModule(triangle_vert_shader.value());
-    this->device.dev.destroyShaderModule(triangle_frag_shader.value());
-
-    this->main_deletion_queue.push_function([=, this]{
-            this->device.dev.destroyPipelineLayout(this->triangle_pipeline.layout);
-            this->device.dev.destroyPipeline(this->triangle_pipeline.pipeline);
             });
 
     return true;
@@ -701,21 +694,10 @@ bool engine_t::init_imgui()
 
 bool engine_t::init_default_data()
 {
-    std::array<vertex_t, 4> verts;
-    verts[0].position = glm::vec3( 0.5f, -0.5f, 0);
-    verts[1].position = glm::vec3( 0.5f,  0.5f, 0);
-    verts[2].position = glm::vec3(-0.5f, -0.5f, 0);
-    verts[3].position = glm::vec3(-0.5f,  0.5f, 0);
-
-    verts[0].color = glm::vec4(0, 0, 0, 1);
-    verts[1].color = glm::vec4(0.5f, 0.5f, 0.5f, 1);
-    verts[2].color = glm::vec4(1, 0, 0, 1);
-    verts[3].color = glm::vec4(0, 1, 0, 1);
-
-    std::array<std::uint32_t, 6> indices = { 0, 1, 2, 2, 1, 3 };
-    auto ret = this->upload_mesh(indices, verts);
+    auto ret = load_gltf_meshes(this, "tests/assets/basicmesh.glb");
     if (!ret.has_value()) return false;
-    this->rectangle = ret.value();
+    this->test_meshes = ret.value();
+
     return true;
 }
 

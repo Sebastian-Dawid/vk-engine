@@ -24,14 +24,15 @@ struct pipeline_builder_t
     pipeline_builder_t();
 
     void clear();
-    pipeline_builder_t& set_shaders(vk::ShaderModule vertex_shader, vk::ShaderModule fragment_shader);
-    pipeline_builder_t& set_input_topology(vk::PrimitiveTopology topology);
-    pipeline_builder_t& set_polygon_mode(vk::PolygonMode mode);
-    pipeline_builder_t& set_cull_mode(vk::CullModeFlags cull_mode, vk::FrontFace front_face);
+    pipeline_builder_t& set_shaders(const vk::ShaderModule vertex_shader, const vk::ShaderModule fragment_shader);
+    pipeline_builder_t& set_input_topology(const vk::PrimitiveTopology topology);
+    pipeline_builder_t& set_polygon_mode(const vk::PolygonMode mode);
+    pipeline_builder_t& set_cull_mode(const vk::CullModeFlags cull_mode, const vk::FrontFace front_face);
     pipeline_builder_t& set_multisampling_none();
     pipeline_builder_t& disable_blending();
-    pipeline_builder_t& set_color_attachment_format(vk::Format format);
-    pipeline_builder_t& set_depth_format(vk::Format format);
+    pipeline_builder_t& set_color_attachment_format(const vk::Format format);
+    pipeline_builder_t& set_depth_format(const vk::Format format);
     pipeline_builder_t& disable_depthtest();
+    pipeline_builder_t& enable_depthtest(const bool depth_write_enable, const vk::CompareOp op);
     std::optional<vk::Pipeline> build(vk::Device dev);
 };

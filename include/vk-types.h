@@ -22,10 +22,10 @@ struct allocated_buffer_t
 
 struct vertex_t
 {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 uv;
-    glm::vec4 color;
+    alignas(16) glm::vec3 position;
+    alignas(16) glm::vec3 normal;
+    alignas(16) glm::vec2 uv;
+    alignas(16) glm::vec4 color;
 };
 
 struct gpu_mesh_buffer_t

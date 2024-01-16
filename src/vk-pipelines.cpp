@@ -1,5 +1,5 @@
-#include <cstdint>
 #include <vk-pipelines.h>
+#include <cstdint>
 #include <fstream>
 #include <error_fmt.h>
 
@@ -45,7 +45,7 @@ void pipeline_builder_t::clear()
     this->shader_stages.clear();
 }
 
-pipeline_builder_t& pipeline_builder_t::set_shaders(vk::ShaderModule vertex_shader, vk::ShaderModule fragment_shader)
+pipeline_builder_t& pipeline_builder_t::set_shaders(const vk::ShaderModule vertex_shader, const vk::ShaderModule fragment_shader)
 {
     this->shader_stages.clear();
     this->shader_stages.push_back(vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eVertex, vertex_shader, "main"));
@@ -53,21 +53,21 @@ pipeline_builder_t& pipeline_builder_t::set_shaders(vk::ShaderModule vertex_shad
     return *this;
 }
 
-pipeline_builder_t& pipeline_builder_t::set_input_topology(vk::PrimitiveTopology topology)
+pipeline_builder_t& pipeline_builder_t::set_input_topology(const vk::PrimitiveTopology topology)
 {
     this->input_assembly.topology = topology;
     this->input_assembly.primitiveRestartEnable = VK_FALSE;
     return *this;
 }
 
-pipeline_builder_t& pipeline_builder_t::set_polygon_mode(vk::PolygonMode mode)
+pipeline_builder_t& pipeline_builder_t::set_polygon_mode(const vk::PolygonMode mode)
 {
     this->rasterizer.polygonMode = mode;
     this->rasterizer.lineWidth = 1.f;
     return *this;
 }
 
-pipeline_builder_t& pipeline_builder_t::set_cull_mode(vk::CullModeFlags cull_mode, vk::FrontFace front_face)
+pipeline_builder_t& pipeline_builder_t::set_cull_mode(const vk::CullModeFlags cull_mode, const vk::FrontFace front_face)
 {
     this->rasterizer.cullMode = cull_mode;
     this->rasterizer.frontFace = front_face;
@@ -93,14 +93,14 @@ pipeline_builder_t& pipeline_builder_t::disable_blending()
     return *this;
 }
 
-pipeline_builder_t& pipeline_builder_t::set_color_attachment_format(vk::Format format)
+pipeline_builder_t& pipeline_builder_t::set_color_attachment_format(const vk::Format format)
 {
     this->color_attachment_format = format;
     this->render_info.setColorAttachmentFormats(this->color_attachment_format);
     return *this;
 }
 
-pipeline_builder_t& pipeline_builder_t::set_depth_format(vk::Format format)
+pipeline_builder_t& pipeline_builder_t::set_depth_format(const vk::Format format)
 {
     this->render_info.depthAttachmentFormat = format;
     return *this;
@@ -110,6 +110,12 @@ pipeline_builder_t& pipeline_builder_t::disable_depthtest()
 {
     this->depth_stencil = vk::PipelineDepthStencilStateCreateInfo();
     this->depth_stencil.maxDepthBounds = 1.f;
+    return *this;
+}
+
+pipeline_builder_t& pipeline_builder_t::enable_depthtest(const bool depth_write_enable, const vk::CompareOp op)
+{
+    this->depth_stencil = vk::PipelineDepthStencilStateCreateInfo({}, VK_TRUE, depth_write_enable, op, VK_FALSE, VK_FALSE, {}, {}, 0.f, 1.f);
     return *this;
 }
 
