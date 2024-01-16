@@ -2,6 +2,7 @@
 
 #define VULKAN_HPP_NO_EXCEPTIONS
 #include <vulkan/vulkan.hpp>
+#include <optional>
 
 namespace vkutil {
     std::optional<vk::ShaderModule> load_shader_module(const char* file_path, vk::Device device);
@@ -32,5 +33,5 @@ struct pipeline_builder_t
     pipeline_builder_t& set_color_attachment_format(vk::Format format);
     pipeline_builder_t& set_depth_format(vk::Format format);
     pipeline_builder_t& disable_depthtest();
-    vk::Pipeline build(vk::Device dev);
+    std::optional<vk::Pipeline> build(vk::Device dev);
 };

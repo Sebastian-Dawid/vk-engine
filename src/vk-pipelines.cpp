@@ -56,7 +56,7 @@ pipeline_builder_t& pipeline_builder_t::set_shaders(vk::ShaderModule vertex_shad
 pipeline_builder_t& pipeline_builder_t::set_input_topology(vk::PrimitiveTopology topology)
 {
     this->input_assembly.topology = topology;
-    this->input_assembly.primitiveRestartEnable = vk::False;
+    this->input_assembly.primitiveRestartEnable = VK_FALSE;
     return *this;
 }
 
@@ -76,12 +76,12 @@ pipeline_builder_t& pipeline_builder_t::set_cull_mode(vk::CullModeFlags cull_mod
 
 pipeline_builder_t& pipeline_builder_t::set_multisampling_none()
 {
-    this->multisampling.sampleShadingEnable = vk::False;
+    this->multisampling.sampleShadingEnable = VK_FALSE;
     this->multisampling.rasterizationSamples = vk::SampleCountFlagBits::e1;
     this->multisampling.minSampleShading = 1.f;
     this->multisampling.pSampleMask = nullptr;
-    this->multisampling.alphaToCoverageEnable = vk::False;
-    this->multisampling.alphaToOneEnable = vk::False;
+    this->multisampling.alphaToCoverageEnable = VK_FALSE;
+    this->multisampling.alphaToOneEnable = VK_FALSE;
     return *this;
 }
 
@@ -89,7 +89,7 @@ pipeline_builder_t& pipeline_builder_t::disable_blending()
 {
     this->color_blend_attachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG
         | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-    this->color_blend_attachment.blendEnable = vk::False;
+    this->color_blend_attachment.blendEnable = VK_FALSE;
     return *this;
 }
 
@@ -113,10 +113,10 @@ pipeline_builder_t& pipeline_builder_t::disable_depthtest()
     return *this;
 }
 
-vk::Pipeline pipeline_builder_t::build(vk::Device dev)
+std::optional<vk::Pipeline> pipeline_builder_t::build(vk::Device dev)
 {
     vk::PipelineViewportStateCreateInfo viewport_state({}, 1, {}, 1);
-    vk::PipelineColorBlendStateCreateInfo color_blending({}, vk::False, vk::LogicOp::eCopy, this->color_blend_attachment);
+    vk::PipelineColorBlendStateCreateInfo color_blending({}, VK_FALSE, vk::LogicOp::eCopy, this->color_blend_attachment);
     vk::PipelineVertexInputStateCreateInfo vertex_input_info;
     vk::DynamicState state[] = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
     vk::PipelineDynamicStateCreateInfo dynamic_info({}, state);

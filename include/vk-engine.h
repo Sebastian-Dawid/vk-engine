@@ -121,6 +121,14 @@ struct engine_t
         vk::PipelineLayout layout;
     } triangle_pipeline;
 
+    struct
+    {
+        vk::Pipeline pipeline;
+        vk::PipelineLayout layout;
+    } mesh_pipeline;
+
+    gpu_mesh_buffer_t rectangle;
+
     std::vector<compute_effect_t> background_effects;
     std::uint32_t current_bg_effect = 0;
 
@@ -129,12 +137,20 @@ struct engine_t
     bool init_sync_structures();
     bool init_descriptors();
     bool init_pipelines();
+    bool init_mesh_pipeline();
     bool init_triangle_pipelines();
     bool init_background_pipelines();
     bool init_imgui();
 
+    bool init_default_data();
+
     bool create_swapchain(std::uint32_t width, std::uint32_t height);
     void destroy_swapchain();
+
+    std::optional<allocated_buffer_t> create_buffer(std::size_t alloc_size, vk::BufferUsageFlags buffer_usage, VmaMemoryUsage memory_usage);
+    void destroy_buffer(const allocated_buffer_t& buf);
+
+    std::optional<gpu_mesh_buffer_t> upload_mesh(std::span<std::uint32_t> indicies, std::span<vertex_t> vertices);
 
     frame_data_t& get_current_frame();
 

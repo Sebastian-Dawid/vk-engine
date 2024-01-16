@@ -107,6 +107,12 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
     cmd.setScissor(0, scissor);
     cmd.draw(3, 1, 0, 0);
+    
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, this->mesh_pipeline.pipeline);
+    gpu_draw_push_constants_t push_constants = { glm::mat4{ 1.f }, this->rectangle.vertex_buffer_address };
+    cmd.pushConstants(this->mesh_pipeline.layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
+    cmd.bindIndexBuffer(this->rectangle.index_buffer.buffer, 0, vk::IndexType::eUint32);
+    cmd.drawIndexed(6, 1, 0, 0, 0);
     cmd.endRendering();
 }
 
@@ -378,6 +384,7 @@ bool engine_t::init_vulkan()
     if (!this->init_descriptors()) return false;
     if (!this->init_pipelines()) return false;
     if (!this->init_imgui()) return false;
+    if (!this->init_default_data()) return false;
 
     this->initialized = true;
     return true;
@@ -495,8 +502,54 @@ bool engine_t::init_descriptors()
 
 bool engine_t::init_pipelines()
 {
+    if (!this->init_mesh_pipeline()) return false;
     if (!this->init_triangle_pipelines()) return false;
     return this->init_background_pipelines();
+}
+
+bool engine_t::init_mesh_pipeline()
+{
+    auto triangle_frag_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle.frag.spv", this->device.dev);
+    if (!triangle_frag_shader.has_value()) return false;
+    auto triangle_vert_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle_mesh.vert.spv", this->device.dev);
+    if (!triangle_vert_shader.has_value()) return false;
+
+    vk::PushConstantRange buffer_range(vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t));
+    vk::PipelineLayoutCreateInfo pipeline_layout_info;
+    pipeline_layout_info.setPushConstantRanges(buffer_range);
+    vk::Result result;
+    std::tie(result, this->mesh_pipeline.layout) = this->device.dev.createPipelineLayout(pipeline_layout_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create pipeline layout!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    pipeline_builder_t pipeline_builder;
+    pipeline_builder.pipeline_layout = this->mesh_pipeline.layout;
+    pipeline_builder.set_shaders(triangle_vert_shader.value(), triangle_frag_shader.value())
+        .set_input_topology(vk::PrimitiveTopology::eTriangleList)
+        .set_polygon_mode(vk::PolygonMode::eFill)
+        .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
+        .set_multisampling_none()
+        .disable_blending()
+        .disable_depthtest()
+        .set_color_attachment_format(this->draw_image.format)
+        .set_depth_format(vk::Format::eUndefined);
+
+    auto pipeline = pipeline_builder.build(this->device.dev);
+    if (!pipeline.has_value()) return false;
+    this->mesh_pipeline.pipeline = pipeline.value();
+
+    this->device.dev.destroyShaderModule(triangle_frag_shader.value());
+    this->device.dev.destroyShaderModule(triangle_vert_shader.value());
+
+    this->main_deletion_queue.push_function([=, this](){
+            this->device.dev.destroyPipelineLayout(this->mesh_pipeline.layout);
+            this->device.dev.destroyPipeline(this->mesh_pipeline.pipeline);
+            });
+
+    return true;
 }
 
 bool engine_t::init_triangle_pipelines()
@@ -524,8 +577,9 @@ bool engine_t::init_triangle_pipelines()
         .disable_depthtest()
         .set_color_attachment_format(this->draw_image.format)
         .set_depth_format(vk::Format::eUndefined);
-    this->triangle_pipeline.pipeline = pipeline_builder.build(this->device.dev);
-    if (this->triangle_pipeline.pipeline == nullptr) return false;
+    auto pipeline = pipeline_builder.build(this->device.dev);
+    if (!pipeline.has_value()) return false;
+    this->triangle_pipeline.pipeline = pipeline.value();
     
     this->device.dev.destroyShaderModule(triangle_vert_shader.value());
     this->device.dev.destroyShaderModule(triangle_frag_shader.value());
@@ -645,6 +699,26 @@ bool engine_t::init_imgui()
     return true;
 }
 
+bool engine_t::init_default_data()
+{
+    std::array<vertex_t, 4> verts;
+    verts[0].position = glm::vec3( 0.5f, -0.5f, 0);
+    verts[1].position = glm::vec3( 0.5f,  0.5f, 0);
+    verts[2].position = glm::vec3(-0.5f, -0.5f, 0);
+    verts[3].position = glm::vec3(-0.5f,  0.5f, 0);
+
+    verts[0].color = glm::vec4(0, 0, 0, 1);
+    verts[1].color = glm::vec4(0.5f, 0.5f, 0.5f, 1);
+    verts[2].color = glm::vec4(1, 0, 0, 1);
+    verts[3].color = glm::vec4(0, 1, 0, 1);
+
+    std::array<std::uint32_t, 6> indices = { 0, 1, 2, 2, 1, 3 };
+    auto ret = this->upload_mesh(indices, verts);
+    if (!ret.has_value()) return false;
+    this->rectangle = ret.value();
+    return true;
+}
+
 bool engine_t::immediate_submit(std::function<void(vk::CommandBuffer cmd)>&& function)
 {
     vk::Result result = this->device.dev.resetFences(this->imm_submit.fence);
@@ -725,6 +799,67 @@ void engine_t::destroy_swapchain()
     for (vk::ImageView view : this->swapchain.views)
         this->device.dev.destroyImageView(view);
     this->device.dev.destroySwapchainKHR(this->swapchain.swapchain);
+}
+
+std::optional<allocated_buffer_t> engine_t::create_buffer(std::size_t alloc_size, vk::BufferUsageFlags usage, VmaMemoryUsage memory_usage)
+{
+    vk::BufferCreateInfo buffer_info({}, alloc_size, usage);
+    VmaAllocationCreateInfo vma_alloc_info{ .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = memory_usage };
+    allocated_buffer_t buf;
+    if (vmaCreateBuffer(this->allocator, (VkBufferCreateInfo*)&buffer_info, &vma_alloc_info, (VkBuffer*)&buf.buffer, &buf.allocation, &buf.info) != VK_SUCCESS)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create buffer!\n", ERROR_FMT("ERROR"));
+        return std::nullopt;
+    }
+    return buf;
+}
+
+void engine_t::destroy_buffer(const allocated_buffer_t& buf)
+{
+    vmaDestroyBuffer(this->allocator, (VkBuffer)buf.buffer, buf.allocation);
+}
+
+std::optional<gpu_mesh_buffer_t> engine_t::upload_mesh(std::span<std::uint32_t> indices, std::span<vertex_t> vertices)
+{
+    const std::size_t vertex_buffer_size = vertices.size() * sizeof(vertex_t);
+    const std::size_t index_buffer_size = indices.size() * sizeof(std::uint32_t);
+    gpu_mesh_buffer_t buf;
+    
+    auto ret = this->create_buffer(vertex_buffer_size, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
+            | vk::BufferUsageFlagBits::eShaderDeviceAddress, VMA_MEMORY_USAGE_GPU_ONLY);
+    if (!ret.has_value()) return std::nullopt;
+    buf.vertex_buffer = ret.value();
+
+    vk::BufferDeviceAddressInfo device_address_info(buf.vertex_buffer.buffer);
+    buf.vertex_buffer_address = this->device.dev.getBufferAddress(&device_address_info);
+
+    ret = this->create_buffer(index_buffer_size, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+    if (!ret.has_value()) return std::nullopt;
+    buf.index_buffer = ret.value();
+    
+    auto staging = this->create_buffer(vertex_buffer_size + index_buffer_size, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+    if (!staging.has_value()) return std::nullopt;
+
+    void* data = staging.value().info.pMappedData;
+    std::memcpy(data, vertices.data(), vertex_buffer_size);
+    std::memcpy((char*)data + vertex_buffer_size, indices.data(), index_buffer_size);
+
+    this->immediate_submit([&](vk::CommandBuffer cmd)
+            {
+            vk::BufferCopy vertex_copy( {}, {}, vertex_buffer_size );
+            cmd.copyBuffer(staging.value().buffer, buf.vertex_buffer.buffer, vertex_copy);
+            vk::BufferCopy index_copy( vertex_buffer_size, 0, index_buffer_size );
+            cmd.copyBuffer(staging.value().buffer, buf.index_buffer.buffer, index_copy);
+            });
+
+    this->destroy_buffer(staging.value());
+
+    this->main_deletion_queue.push_function([=, this](){
+            this->destroy_buffer(buf.index_buffer);
+            this->destroy_buffer(buf.vertex_buffer);
+            });
+
+    return buf;
 }
 
 frame_data_t& engine_t::get_current_frame()
