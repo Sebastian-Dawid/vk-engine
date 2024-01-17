@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <span>
 #define VULKAN_HPP_NO_EXCEPTIONS
@@ -53,4 +54,17 @@ struct descriptor_allocator_growable_t
 
     std::optional<vk::DescriptorPool> get_pool(vk::Device device);
     std::optional<vk::DescriptorPool> create_pool(vk::Device device, std::uint32_t set_count, std::span<pool_size_ratio_t> pool_ratios);
+};
+
+struct descriptor_writer_t
+{
+    std::deque<vk::DescriptorImageInfo> image_infos;
+    std::deque<vk::DescriptorBufferInfo> buffer_infos;
+    std::vector<vk::WriteDescriptorSet> writes;
+
+    void write_image(std::int32_t binding, vk::ImageView image, vk::Sampler sampler, vk::ImageLayout layout, vk::DescriptorType type);
+    void write_buffer(std::int32_t binding, vk::Buffer buffer, std::size_t size, std::size_t offset, vk::DescriptorType type);
+
+    void clear();
+    void update_set(vk::Device device, vk::DescriptorSet set);
 };

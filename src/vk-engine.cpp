@@ -22,6 +22,13 @@ void deletion_queue_t::flush()
     this->deletors.clear();
 }
 
+engine_t* loaded_engine = nullptr;
+
+void engine_t::framebuffer_size_callback(GLFWwindow *window, int width, int height)
+{
+    loaded_engine->resize_swapchain();
+}
+
 engine_t::engine_t()
 {
     glfwInit();
@@ -33,6 +40,8 @@ engine_t::engine_t()
     }
     this->window.width = 1024;
     this->window.height = 1024;
+    loaded_engine = this;
+    glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
 }
 
 engine_t::~engine_t()
@@ -46,8 +55,6 @@ engine_t::~engine_t()
             abort();
         }
 
-        this->main_deletion_queue.flush();
-
         for (std::size_t i = 0; i < FRAME_OVERLAP; ++i)
         {
             this->device.dev.destroyCommandPool(this->frames[i].pool);
@@ -55,7 +62,13 @@ engine_t::~engine_t()
             this->device.dev.destroyFence(this->frames[i].render_fence);
             this->device.dev.destroySemaphore(this->frames[i].render_semaphore);
             this->device.dev.destroySemaphore(this->frames[i].swapchain_semaphore);
+
+            this->frames[i].deletion_queue.flush();
         }
+
+        // WARN: flush main deletion queue only after deletion queues of the frames have been flushed
+        // since they rely on the allocator that is destroyed in the main deletion queue
+        this->main_deletion_queue.flush();
 
         this->destroy_swapchain();
         this->device.dev.destroy();
@@ -125,6 +138,38 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
     cmd.setScissor(0, scissor);
 
+    auto ret = create_buffer(sizeof(gpu_scene_data_t), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    if (!ret.has_value()) return;
+
+    {
+        allocated_buffer_t gpu_scene_data_buffer = ret.value();
+        this->get_current_frame().deletion_queue.push_function([=, this]() {
+                this->destroy_buffer(gpu_scene_data_buffer);
+                });
+
+        gpu_scene_data_t* scene_uniform_data = (gpu_scene_data_t*)gpu_scene_data_buffer.info.pMappedData;
+        *scene_uniform_data = this->scene_data.gpu_data;
+        
+        auto ret = this->get_current_frame().frame_descriptors.allocate(this->device.dev, this->scene_data.layout);
+        if (ret.has_value())
+        {
+            vk::DescriptorSet global_descriptor = ret.value();
+            descriptor_writer_t writer;
+            writer.write_buffer(0, gpu_scene_data_buffer.buffer, sizeof(gpu_scene_data_t), 0, vk::DescriptorType::eUniformBuffer);
+            writer.update_set(this->device.dev, global_descriptor);
+        }
+    }
+
+    auto image_set = this->get_current_frame().frame_descriptors.allocate(this->device.dev, this->single_image_descriptor_layout);
+    {
+        descriptor_writer_t writer;
+        writer.write_image(0, this->error_checkerboard_image.view, this->default_sampler_nearest,
+                vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
+        writer.update_set(this->device.dev, image_set.value());
+    }
+
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, this->mesh_pipeline.layout, 0, image_set.value(), {});
+
     gpu_draw_push_constants_t push_constants;
 
     glm::mat4 model = glm::rotate(glm::radians(180.f), glm::vec3(0, 1, 0));
@@ -170,6 +215,7 @@ bool engine_t::draw()
     }
 
     this->get_current_frame().deletion_queue.flush();
+    this->get_current_frame().frame_descriptors.clear_pools(this->device.dev);
 
     std::uint32_t swapchain_img_idx;
     std::tie(result, swapchain_img_idx) = this->device.dev.acquireNextImageKHR(this->swapchain.swapchain, 1000000000,
@@ -396,7 +442,9 @@ bool engine_t::init_vulkan()
     allocator_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     vmaCreateAllocator(&allocator_info, &this->allocator);
 
-    this->main_deletion_queue.push_function([&]() { vmaDestroyAllocator(this->allocator); });
+    this->main_deletion_queue.push_function([&]() {
+            vmaDestroyAllocator(this->allocator);
+            });
 
     if (!this->create_swapchain(this->window.width, this->window.height)) return false;
 
@@ -534,7 +582,9 @@ bool engine_t::init_sync_structures()
         fmt::print(stderr, "[ {} ]\tFailed to create fence!\n", ERROR_FMT("ERROR"));
         return false;
     }
-    this->main_deletion_queue.push_function([=, this]() { this->device.dev.destroyFence(this->imm_submit.fence); });
+    this->main_deletion_queue.push_function([=, this]() {
+            this->device.dev.destroyFence(this->imm_submit.fence);
+            });
 
     return true;
 }
@@ -550,16 +600,53 @@ bool engine_t::init_descriptors()
         this->draw_descriptor.layout = ret.value();
     }
 
+    {
+        descriptor_layout_builder_t builder;
+        auto ret = builder.add_binding(0, vk::DescriptorType::eCombinedImageSampler)
+            .build(this->device.dev, vk::ShaderStageFlagBits::eFragment);
+        if (!ret.has_value()) return false;
+        this->single_image_descriptor_layout = ret.value();
+    }
+
+    {
+        descriptor_layout_builder_t builder;
+        auto ret = builder.add_binding(0, vk::DescriptorType::eUniformBuffer)
+            .build(this->device.dev, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
+        if (!ret.has_value()) return false;
+        this->scene_data.layout = ret.value();
+    }
+
     auto ret = this->global_descriptor_allocator.allocate(this->device.dev, this->draw_descriptor.layout);
     if (!ret.has_value()) return false;
     this->draw_descriptor.set = ret.value();
 
-    vk::DescriptorImageInfo img_info({}, this->draw_image.view, vk::ImageLayout::eGeneral);
-    vk::WriteDescriptorSet draw_img_write(this->draw_descriptor.set, 0, {}, 1, vk::DescriptorType::eStorageImage, &img_info);
-    this->device.dev.updateDescriptorSets(draw_img_write, {});
+    {
+        descriptor_writer_t writer;
+        writer.write_image(0, this->draw_image.view, VK_NULL_HANDLE, vk::ImageLayout::eGeneral, vk::DescriptorType::eStorageImage);
+        writer.update_set(this->device.dev, this->draw_descriptor.set);
+    }
+
+    for (std::size_t i = 0; i < FRAME_OVERLAP; ++i)
+    {
+        std::vector<descriptor_allocator_growable_t::pool_size_ratio_t> frame_sizes = {
+            { vk::DescriptorType::eStorageImage, 3 },
+            { vk::DescriptorType::eStorageBuffer, 3 },
+            { vk::DescriptorType::eUniformBuffer, 3 },
+            { vk::DescriptorType::eCombinedImageSampler, 4 }
+        };
+
+        this->frames[i].frame_descriptors = descriptor_allocator_growable_t{};
+        this->frames[i].frame_descriptors.init(this->device.dev, 1000, frame_sizes);
+
+        this->main_deletion_queue.push_function([&, i]() {
+                this->frames[i].frame_descriptors.destroy_pools(this->device.dev);
+                });
+    }
 
     this->main_deletion_queue.push_function([&]() {
+            this->device.dev.destroyDescriptorSetLayout(this->scene_data.layout);
             this->device.dev.destroyDescriptorSetLayout(this->draw_descriptor.layout);
+            this->device.dev.destroyDescriptorSetLayout(this->single_image_descriptor_layout);
             this->global_descriptor_allocator.destroy_pool(this->device.dev);
             });
 
@@ -574,7 +661,7 @@ bool engine_t::init_pipelines()
 
 bool engine_t::init_mesh_pipeline()
 {
-    auto triangle_frag_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle.frag.spv", this->device.dev);
+    auto triangle_frag_shader = vkutil::load_shader_module("tests/build/shaders/tex_image.frag.spv", this->device.dev);
     if (!triangle_frag_shader.has_value()) return false;
     auto triangle_vert_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle_mesh.vert.spv", this->device.dev);
     if (!triangle_vert_shader.has_value()) return false;
@@ -582,6 +669,7 @@ bool engine_t::init_mesh_pipeline()
     vk::PushConstantRange buffer_range(vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t));
     vk::PipelineLayoutCreateInfo pipeline_layout_info;
     pipeline_layout_info.setPushConstantRanges(buffer_range);
+    pipeline_layout_info.setSetLayouts(this->single_image_descriptor_layout);
     vk::Result result;
     std::tie(result, this->mesh_pipeline.layout) = this->device.dev.createPipelineLayout(pipeline_layout_info);
     if (result != vk::Result::eSuccess)
@@ -597,7 +685,8 @@ bool engine_t::init_mesh_pipeline()
         .set_polygon_mode(vk::PolygonMode::eFill)
         .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
         .set_multisampling_none()
-        .enable_blending_additive()
+        //.enable_blending_additive()
+        .disable_blending()
         .enable_depthtest(true, vk::CompareOp::eGreaterOrEqual)
         .set_color_attachment_format(this->draw_image.format)
         .set_depth_format(this->depth_image.format);
@@ -730,6 +819,57 @@ bool engine_t::init_default_data()
     if (!ret.has_value()) return false;
     this->test_meshes = ret.value();
 
+    std::uint32_t white = 0xFFFFFFFF;
+    auto wi = this->create_image((void*)&white, vk::Extent3D(1, 1, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+    if (!wi.has_value()) return false;
+    this->white_image = wi.value();
+    
+    std::uint32_t grey = 0xAAAAAAFF;
+    auto gi = this->create_image((void*)&grey, vk::Extent3D(1, 1, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+    if (!gi.has_value()) return false;
+    this->grey_image = gi.value();
+
+    std::uint32_t black = 0xFF000000;
+    auto bi = this->create_image((void*)&black, vk::Extent3D(1, 1, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+    if (!bi.has_value()) return false;
+    this->black_image = bi.value();
+
+    std::uint32_t magenta = 0xFFFF00FF;
+    std::array<std::uint32_t, 16 * 16> pixels;
+    for (std::size_t x = 0; x < 16; ++x)
+        for (std::size_t y = 0; y < 16; ++y)
+            pixels[y * 16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+
+    auto err_img = this->create_image(pixels.data(), vk::Extent3D(16, 16, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+    if (!err_img.has_value()) return false;
+    this->error_checkerboard_image = err_img.value();
+
+    vk::Result result;
+    vk::SamplerCreateInfo sampler({}, vk::Filter::eNearest, vk::Filter::eNearest);
+    std::tie(result, this->default_sampler_nearest) = this->device.dev.createSampler(sampler);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create sampler!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    sampler = vk::SamplerCreateInfo({}, vk::Filter::eLinear, vk::Filter::eLinear);
+    std::tie(result, this->default_sampler_linear) = this->device.dev.createSampler(sampler);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create sampler!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    
+    this->main_deletion_queue.push_function([&]() {
+            this->destroy_image(this->white_image);
+            this->destroy_image(this->grey_image);
+            this->destroy_image(this->black_image);
+            this->destroy_image(this->error_checkerboard_image);
+            this->device.dev.destroySampler(this->default_sampler_nearest);
+            this->device.dev.destroySampler(this->default_sampler_linear);
+            });
+
     return true;
 }
 
@@ -852,6 +992,68 @@ std::optional<allocated_buffer_t> engine_t::create_buffer(std::size_t alloc_size
 void engine_t::destroy_buffer(const allocated_buffer_t& buf)
 {
     vmaDestroyBuffer(this->allocator, (VkBuffer)buf.buffer, buf.allocation);
+}
+
+std::optional<allocated_image_t> engine_t::create_image(vk::Extent3D size, vk::Format format, vk::ImageUsageFlags usage, bool mipmapped)
+{
+    allocated_image_t new_img;
+    new_img.format = format;
+    new_img.extent = size;
+
+    vk::ImageCreateInfo img_info({}, vk::ImageType::e2D, format, size, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, usage);
+    if (mipmapped) img_info.mipLevels = static_cast<std::uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
+
+    VmaAllocationCreateInfo alloc_info = { .usage = VMA_MEMORY_USAGE_GPU_ONLY, .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT };
+    if (vmaCreateImage(this->allocator, (VkImageCreateInfo*)&img_info, &alloc_info, (VkImage*)&new_img.image, &new_img.allocation, nullptr) != VK_SUCCESS)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create image!\n", ERROR_FMT("ERROR"));
+        return std::nullopt;
+    }
+
+    vk::ImageAspectFlags aspect_flag = vk::ImageAspectFlagBits::eColor;
+    if (format == vk::Format::eD32Sfloat) aspect_flag = vk::ImageAspectFlagBits::eDepth;
+
+    vk::ImageViewCreateInfo view_info({}, new_img.image, vk::ImageViewType::e2D, format, {}, vk::ImageSubresourceRange(aspect_flag, 0, 1, 0, 1));
+    view_info.subresourceRange.levelCount = img_info.mipLevels;
+
+    vk::Result result;
+    std::tie(result, new_img.view) = this->device.dev.createImageView(view_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create image view!\n", ERROR_FMT("ERROR"));
+        return std::nullopt;
+    }
+
+    return new_img;
+}
+
+std::optional<allocated_image_t> engine_t::create_image(void* data, vk::Extent3D size, vk::Format format, vk::ImageUsageFlags usage, bool mipmapped)
+{
+    std::size_t data_size = size.depth * size.width * size.height * 4;
+    auto upload_buffer = create_buffer(data_size, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    if (!upload_buffer.has_value()) return std::nullopt;
+    std::memcpy(upload_buffer.value().info.pMappedData, data, data_size);
+    auto new_img = this->create_image(size, format, usage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, mipmapped);
+    if (!new_img.has_value()) return std::nullopt;
+
+    this->immediate_submit([&](vk::CommandBuffer cmd) {
+            vkutil::transition_image(cmd, new_img.value().image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+
+            vk::BufferImageCopy copy_region(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1), {}, size);
+            cmd.copyBufferToImage(upload_buffer.value().buffer, new_img.value().image, vk::ImageLayout::eTransferDstOptimal, copy_region);
+
+            vkutil::transition_image(cmd, new_img.value().image, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+            });
+
+    this->destroy_buffer(upload_buffer.value());
+
+    return new_img.value();
+}
+
+void engine_t::destroy_image(const allocated_image_t& img)
+{
+    this->device.dev.destroyImageView(img.view);
+    vmaDestroyImage(this->allocator, img.image, img.allocation);
 }
 
 std::optional<gpu_mesh_buffer_t> engine_t::upload_mesh(std::span<std::uint32_t> indices, std::span<vertex_t> vertices)

@@ -175,3 +175,31 @@ std::optional<vk::DescriptorPool> descriptor_allocator_growable_t::create_pool(v
     }
     return pool;
 }
+
+void descriptor_writer_t::write_buffer(std::int32_t binding, vk::Buffer buffer, std::size_t size, std::size_t offset, vk::DescriptorType type)
+{
+    vk::DescriptorBufferInfo& info = this->buffer_infos.emplace_back(vk::DescriptorBufferInfo(buffer, offset, size));
+    vk::WriteDescriptorSet write({}, binding, {}, 1, type, {}, &info);
+    this->writes.push_back(write);
+}
+
+void descriptor_writer_t::write_image(std::int32_t binding, vk::ImageView image, vk::Sampler sampler, vk::ImageLayout layout, vk::DescriptorType type)
+{
+    vk::DescriptorImageInfo& info = this->image_infos.emplace_back(vk::DescriptorImageInfo(sampler, image, layout));
+    vk::WriteDescriptorSet write({}, binding, {}, 1, type, &info);
+    this->writes.push_back(write);
+}
+
+void descriptor_writer_t::clear()
+{
+    this->image_infos.clear();
+    this->writes.clear();
+    this->buffer_infos.clear();
+}
+
+void descriptor_writer_t::update_set(vk::Device device, vk::DescriptorSet set)
+{
+    for (vk::WriteDescriptorSet& write : this->writes)
+        write.dstSet = set;
+    device.updateDescriptorSets(this->writes, {});
+}

@@ -30,6 +30,16 @@ struct compute_effect_t
     compute_push_constants_t data;
 };
 
+struct gpu_scene_data_t
+{
+    alignas(16) glm::mat4 view;
+    alignas(16) glm::mat4 proj;
+    alignas(16) glm::mat4 viewproj;
+    alignas(16) glm::vec4 ambient_color;
+    alignas(16) glm::vec4 sunlight_dir;
+    alignas(16) glm::vec4 sunlight_color;
+};
+
 struct deletion_queue_t
 {
     std::vector<std::function<void()>> deletors;
@@ -46,6 +56,7 @@ struct frame_data_t
     vk::Fence render_fence;
 
     deletion_queue_t deletion_queue;
+    descriptor_allocator_growable_t frame_descriptors;
 };
 constexpr std::uint32_t FRAME_OVERLAP = 2;
 
@@ -127,8 +138,24 @@ struct engine_t
 
     std::vector<std::shared_ptr<mesh_asset_t>> test_meshes;
 
+    struct
+    {
+        gpu_scene_data_t gpu_data;
+        vk::DescriptorSetLayout layout;
+    } scene_data;
+
+    allocated_image_t white_image;
+    allocated_image_t black_image;
+    allocated_image_t grey_image;
+    allocated_image_t error_checkerboard_image;
+
+    vk::Sampler default_sampler_linear;
+    vk::Sampler default_sampler_nearest;
+
     std::vector<compute_effect_t> background_effects;
     std::uint32_t current_bg_effect = 0;
+
+    vk::DescriptorSetLayout single_image_descriptor_layout;
 
     bool init_vulkan();
     bool init_commands();
@@ -148,6 +175,10 @@ struct engine_t
     std::optional<allocated_buffer_t> create_buffer(std::size_t alloc_size, vk::BufferUsageFlags buffer_usage, VmaMemoryUsage memory_usage);
     void destroy_buffer(const allocated_buffer_t& buf);
 
+    std::optional<allocated_image_t> create_image(vk::Extent3D size, vk::Format format, vk::ImageUsageFlags usage, bool mipmapped = false);
+    std::optional<allocated_image_t> create_image(void* data, vk::Extent3D size, vk::Format format, vk::ImageUsageFlags usage, bool mipmapped = false);
+    void destroy_image(const allocated_image_t& img);
+
     std::optional<gpu_mesh_buffer_t> upload_mesh(std::span<std::uint32_t> indicies, std::span<vertex_t> vertices);
 
     frame_data_t& get_current_frame();
@@ -159,6 +190,8 @@ struct engine_t
     bool run();
 
     bool immediate_submit(std::function<void(vk::CommandBuffer cmd)>&& function);
+
+    static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
     engine_t();
     ~engine_t();
