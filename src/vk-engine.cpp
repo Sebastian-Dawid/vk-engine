@@ -73,6 +73,11 @@ bool engine_t::run()
         glfwPollEvents();
         if (glfwGetKey(this->window.win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(this->window.win, GLFW_TRUE);
 
+        if (this->window.resize_requested)
+        {
+            if (!this->resize_swapchain()) return false;
+        }
+
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -81,11 +86,17 @@ bool engine_t::run()
             compute_effect_t& selected = this->background_effects[this->current_bg_effect];
             ImGui::Text("Selected effect: %s", selected.name);
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
-
+ 
+            ImGui::SliderFloat("Render Scale",&this->render_scale, 0.1f, 1.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
             ImGui::InputFloat4("data3", (float*) &selected.data.data3);
             ImGui::InputFloat4("data4", (float*) &selected.data.data4);
+
+            ImGui::Text("Info:");
+            ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
+            ImGui::Text("Window Resolution: (%d, %d)", this->swapchain.extent.width, this->swapchain.extent.height);
+            ImGui::Text("Buffer Resolution: (%d, %d)", this->draw_image.extent.width, this->draw_image.extent.height);
 
             ImGui::End();
         }
@@ -137,7 +148,7 @@ void engine_t::draw_background(vk::CommandBuffer cmd)
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, this->gradient_pipeline.layout, 0, this->draw_descriptor.set, {});
 
     cmd.pushConstants(this->gradient_pipeline.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(selected.data), &selected.data);
-    cmd.dispatch(std::ceil(this->draw_image.extent.width / 16.0), std::ceil(this->draw_image.extent.height / 16.0), 1);
+    cmd.dispatch(std::ceil(this->draw_extent.width / 16.0), std::ceil(this->draw_extent.height / 16.0), 1);
 }
 
 void engine_t::draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view)
@@ -157,17 +168,29 @@ bool engine_t::draw()
         fmt::print(stderr, "[ {} ]\tFailed to wait on render fence!\n", ERROR_FMT("ERROR"));
         return false;
     }
-    if ((result = this->device.dev.resetFences(this->get_current_frame().render_fence)) != vk::Result::eSuccess)
-    {
-        fmt::print(stderr, "[ {} ]\tFailed to reset render semaphore!\n", ERROR_FMT("ERROR"));
-        return false;
-    }
+
+    this->get_current_frame().deletion_queue.flush();
+
     std::uint32_t swapchain_img_idx;
     std::tie(result, swapchain_img_idx) = this->device.dev.acquireNextImageKHR(this->swapchain.swapchain, 1000000000,
             this->get_current_frame().swapchain_semaphore, nullptr);
-    if (result != vk::Result::eSuccess)
+    if (result == vk::Result::eErrorOutOfDateKHR)
+    {
+        this->window.resize_requested = true;
+        return true;
+    }
+    else if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR)
     {
         fmt::print(stderr, "[ {} ]\tFailed to aquire image!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    this->draw_extent.width = std::min(this->swapchain.extent.width, this->draw_image.extent.width) * this->render_scale;
+    this->draw_extent.height = std::min(this->swapchain.extent.height, this->draw_image.extent.height) * this->render_scale;
+
+    if ((result = this->device.dev.resetFences(this->get_current_frame().render_fence)) != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to reset render semaphore!\n", ERROR_FMT("ERROR"));
         return false;
     }
 
@@ -178,8 +201,8 @@ bool engine_t::draw()
         return false;
     }
 
-    this->draw_extent.width = this->draw_image.extent.width;
-    this->draw_extent.height = this->draw_image.extent.height;
+    // this->draw_extent.width = this->draw_image.extent.width;
+    // this->draw_extent.height = this->draw_image.extent.height;
     vk::CommandBufferBeginInfo begin_info(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     if (result = cmd.begin(&begin_info); result != vk::Result::eSuccess)
     {
@@ -224,7 +247,13 @@ bool engine_t::draw()
     }
 
     vk::PresentInfoKHR present_info(this->get_current_frame().render_semaphore, this->swapchain.swapchain, swapchain_img_idx);
-    if (result = this->device.present.queue.presentKHR(&present_info); result != vk::Result::eSuccess)
+    result = this->device.present.queue.presentKHR(&present_info);
+    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
+    {
+        this->window.resize_requested = true;
+        return true;
+    }
+    else if (result != vk::Result::eSuccess)
     {
         fmt::print(stderr, "[ {} ]\tFailed to present!\n", ERROR_FMT("ERROR"));
         return false;
@@ -371,7 +400,10 @@ bool engine_t::init_vulkan()
 
     if (!this->create_swapchain(this->window.width, this->window.height)) return false;
 
-    this->draw_image.extent = vk::Extent3D(this->window.width, this->window.height, 1);
+    // get screen resolution
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+
+    this->draw_image.extent = vk::Extent3D(mode->width, mode->height, 1);//this->window.width, this->window.height, 1);
     this->draw_image.format = vk::Format::eR16G16B16A16Sfloat;
     vk::ImageCreateInfo rimg_info({}, vk::ImageType::e2D, this->draw_image.format, this->draw_image.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eColorAttachment);
@@ -565,7 +597,7 @@ bool engine_t::init_mesh_pipeline()
         .set_polygon_mode(vk::PolygonMode::eFill)
         .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
         .set_multisampling_none()
-        .disable_blending()
+        .enable_blending_additive()
         .enable_depthtest(true, vk::CompareOp::eGreaterOrEqual)
         .set_color_attachment_format(this->draw_image.format)
         .set_depth_format(this->depth_image.format);
@@ -776,11 +808,32 @@ bool engine_t::create_swapchain(std::uint32_t width, std::uint32_t height)
     return true;
 }
 
+bool engine_t::resize_swapchain()
+{
+    if (this->device.dev.waitIdle() != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFaild to wait!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+    this->destroy_swapchain();
+    int w, h;
+    glfwGetWindowSize(this->window.win, &w, &h);
+    this->window.width = w;
+    this->window.height = h;
+    
+    if (!this->create_swapchain(w, h)) return false;
+
+    this->window.resize_requested = false;
+    return true;
+}
+
 void engine_t::destroy_swapchain()
 {
     for (vk::ImageView view : this->swapchain.views)
         this->device.dev.destroyImageView(view);
     this->device.dev.destroySwapchainKHR(this->swapchain.swapchain);
+    this->swapchain.images.clear();
+    this->swapchain.views.clear();
 }
 
 std::optional<allocated_buffer_t> engine_t::create_buffer(std::size_t alloc_size, vk::BufferUsageFlags usage, VmaMemoryUsage memory_usage)

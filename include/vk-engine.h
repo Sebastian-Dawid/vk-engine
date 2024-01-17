@@ -64,6 +64,7 @@ struct engine_t
         std::uint32_t width;
         std::uint32_t height;
         vk::SurfaceKHR surface;
+        bool resize_requested;
     } window;
     
     vk::PhysicalDevice physical_device;
@@ -91,6 +92,7 @@ struct engine_t
     allocated_image_t draw_image;
     allocated_image_t depth_image;
     vk::Extent2D draw_extent;
+    float render_scale = 1.f;
 
     frame_data_t frames[FRAME_OVERLAP];
     std::size_t frame_count = 0;
@@ -140,6 +142,7 @@ struct engine_t
     bool init_default_data();
 
     bool create_swapchain(std::uint32_t width, std::uint32_t height);
+    bool resize_swapchain();
     void destroy_swapchain();
 
     std::optional<allocated_buffer_t> create_buffer(std::size_t alloc_size, vk::BufferUsageFlags buffer_usage, VmaMemoryUsage memory_usage);

@@ -30,6 +30,8 @@ struct pipeline_builder_t
     pipeline_builder_t& set_cull_mode(const vk::CullModeFlags cull_mode, const vk::FrontFace front_face);
     pipeline_builder_t& set_multisampling_none();
     pipeline_builder_t& disable_blending();
+    pipeline_builder_t& enable_blending_additive();
+    pipeline_builder_t& enable_blending_alphablend();
     pipeline_builder_t& set_color_attachment_format(const vk::Format format);
     pipeline_builder_t& set_depth_format(const vk::Format format);
     pipeline_builder_t& disable_depthtest();

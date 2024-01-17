@@ -93,6 +93,22 @@ pipeline_builder_t& pipeline_builder_t::disable_blending()
     return *this;
 }
 
+pipeline_builder_t& pipeline_builder_t::enable_blending_additive()
+{
+    this->color_blend_attachment = vk::PipelineColorBlendAttachmentState(VK_TRUE, vk::BlendFactor::eOne, vk::BlendFactor::eDstAlpha, vk::BlendOp::eAdd,
+            vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd, vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG
+            | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
+    return *this;
+}
+
+pipeline_builder_t& pipeline_builder_t::enable_blending_alphablend()
+{
+    this->color_blend_attachment = vk::PipelineColorBlendAttachmentState(VK_TRUE, vk::BlendFactor::eOneMinusDstAlpha, vk::BlendFactor::eDstAlpha, vk::BlendOp::eAdd,
+            vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd, vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG
+            | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
+    return *this;
+}
+
 pipeline_builder_t& pipeline_builder_t::set_color_attachment_format(const vk::Format format)
 {
     this->color_attachment_format = format;

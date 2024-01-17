@@ -13,7 +13,9 @@
 
 std::optional<std::vector<std::shared_ptr<mesh_asset_t>>> load_gltf_meshes(engine_t *engine, std::filesystem::path filepath)
 {
+#ifdef DEBUG
     fmt::print("[ {} ]\tLoading GLFT: {}\n", INFO_FMT("INFO"), filepath.c_str());
+#endif
     fastgltf::GltfDataBuffer data;
     data.loadFromFile(filepath);
 
@@ -114,6 +116,8 @@ std::optional<std::vector<std::shared_ptr<mesh_asset_t>>> load_gltf_meshes(engin
         meshes.emplace_back(std::make_shared<mesh_asset_t>(std::move(new_mesh)));
     }
 
+#ifdef DEBUG
     fmt::print("[ {} ]\tFinished loading GLFT: {}\n", INFO_FMT("INFO"), filepath.c_str());
+#endif
     return meshes;
 }
