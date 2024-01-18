@@ -40,3 +40,23 @@ struct gpu_draw_push_constants_t
     glm::mat4 world;
     vk::DeviceAddress vertex_buffer;
 };
+
+enum struct material_pass_e : std::uint8_t
+{
+    MAIN_COLOR,
+    TRANSPARENT,
+    OTHER
+};
+
+struct material_pipeline_t
+{
+    vk::Pipeline pipeline;
+    vk::PipelineLayout layout;
+};
+
+struct material_instance_t
+{
+    material_pipeline_t* pipeline;
+    vk::DescriptorSet material_set;
+    material_pass_e pass_type;
+};

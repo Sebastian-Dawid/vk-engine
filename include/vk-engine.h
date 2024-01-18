@@ -14,6 +14,39 @@
 
 #include <glm/glm.hpp>
 
+struct gltf_metallic_roughness
+{
+    material_pipeline_t opaque_pipeline;
+    material_pipeline_t transparent_pipeline;
+
+    vk::DescriptorSetLayout material_layout;
+
+    struct material_constants_t
+    {
+        glm::vec4 color_factors;
+        glm::vec4 metal_rought_factors;
+        glm::vec4 extra[14];
+    };
+
+    struct material_resources_t
+    {
+        allocated_image_t color_image;
+        vk::Sampler color_sampler;
+        allocated_image_t metal_rough_image;
+        vk::Sampler metal_rought_sampler;
+        vk::Buffer data_buffer;
+        std::uint32_t data_buffer_offset;
+    };
+
+    descriptor_writer_t writer;
+
+    bool build_pipelines(engine_t* engine);
+    void clear_resources(vk::Device device);
+
+    material_instance_t write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
+            descriptor_allocator_growable_t& descriptor_allocator);
+};
+
 struct compute_push_constants_t
 {
     glm::vec4 data1;

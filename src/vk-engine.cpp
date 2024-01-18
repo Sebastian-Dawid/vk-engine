@@ -8,6 +8,61 @@
 
 #include <glm/gtx/transform.hpp>
 
+bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
+{
+    auto vert_shader = vkutil::load_shader_module("tests/build/shaders/mesh.vert.spv", engine->device.dev);
+    if (!vert_shader.has_value()) return false;
+    auto frag_shader = vkutil::load_shader_module("tests/build/shaders/mesh.frag.spv", engine->device.dev);
+    if (!frag_shader.has_value()) return false;
+
+    vk::PushConstantRange matrix_range(vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t));
+    descriptor_layout_builder_t layout_builder;
+    auto ret_layout = layout_builder.add_binding(0, vk::DescriptorType::eUniformBuffer)
+        .add_binding(1, vk::DescriptorType::eCombinedImageSampler)
+        .add_binding(2, vk::DescriptorType::eCombinedImageSampler)
+        .build(engine->device.dev, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
+    if (!ret_layout.has_value()) return false;
+    this->material_layout = ret_layout.value();
+
+    vk::DescriptorSetLayout layouts[] = { engine->scene_data.layout, this->material_layout };
+    vk::PipelineLayoutCreateInfo mesh_layout_info({}, layouts, matrix_range);
+
+    auto [result, new_layout] = engine->device.dev.createPipelineLayout(mesh_layout_info);
+    if (result != vk::Result::eSuccess)
+    {
+        fmt::print(stderr, "[ {} ]\tFailed to create pipeline layout!\n", ERROR_FMT("ERROR"));
+        return false;
+    }
+
+    this->opaque_pipeline.layout = new_layout;
+    this->transparent_pipeline.layout = new_layout;
+
+    pipeline_builder_t pipeline_builder;
+    pipeline_builder.pipeline_layout = new_layout;
+    auto ret_pipeline = pipeline_builder.set_shaders(vert_shader.value(), frag_shader.value())
+        .set_input_topology(vk::PrimitiveTopology::eTriangleList)
+        .set_polygon_mode(vk::PolygonMode::eFill)
+        .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
+        .set_multisampling_none()
+        .disable_blending()
+        .enable_depthtest(true, vk::CompareOp::eGreaterOrEqual)
+        .set_color_attachment_format(engine->draw_image.format)
+        .set_depth_format(engine->depth_image.format)
+        .build(engine->device.dev);
+    if (!ret_pipeline.has_value()) return false;
+    this->opaque_pipeline.pipeline = ret_pipeline.value();
+    ret_pipeline = pipeline_builder.enable_blending_additive()
+        .enable_depthtest(false, vk::CompareOp::eGreaterOrEqual)
+        .build(engine->device.dev);
+    if (!ret_pipeline.has_value()) return false;
+    this->transparent_pipeline.pipeline = ret_pipeline.value();
+
+    engine->device.dev.destroyShaderModule(vert_shader.value());
+    engine->device.dev.destroyShaderModule(frag_shader.value());
+
+    return true;
+}
+
 void deletion_queue_t::push_function(std::function<void()>&& function)
 {
     this->deletors.push_back(function);
@@ -100,7 +155,7 @@ bool engine_t::run()
             ImGui::Text("Selected effect: %s", selected.name);
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
  
-            ImGui::SliderFloat("Render Scale",&this->render_scale, 0.1f, 1.f);
+            ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
             ImGui::InputFloat4("data3", (float*) &selected.data.data3);
