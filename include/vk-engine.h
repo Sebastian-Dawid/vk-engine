@@ -13,6 +13,7 @@
 #include <vk-loader.h>
 
 #include <glm/glm.hpp>
+#include <camera.h>
 
 struct mesh_node_t : public node_t
 {
@@ -134,7 +135,9 @@ struct engine_t
         vk::SurfaceKHR surface;
         bool resize_requested;
     } window;
-    
+ 
+    camera_t main_camera;
+
     vk::PhysicalDevice physical_device;
     struct device_t
     {

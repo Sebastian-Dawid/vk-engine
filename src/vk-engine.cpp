@@ -62,7 +62,7 @@ bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
         .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
         .set_multisampling_none()
         .disable_blending()
-        .enable_depthtest(true, vk::CompareOp::eGreaterOrEqual)
+        .enable_depthtest(true, vk::CompareOp::eLess)
         .set_color_attachment_format(engine->draw_image.format)
         .set_depth_format(engine->depth_image.format)
         .build(engine->device.dev);
@@ -140,7 +140,10 @@ engine_t::engine_t()
     this->window.width = 1024;
     this->window.height = 1024;
     loaded_engine = this;
+    this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(0.f, 0.f, 5.f), .pitch = 0, .yaw = 0 };
     glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
+    glfwSetWindowUserPointer(this->window.win, &this->main_camera);
+    glfwSetCursorPosCallback(this->window.win, cursor_pos_callback);
 }
 
 engine_t::~engine_t()
@@ -185,6 +188,8 @@ bool engine_t::run()
         glfwPollEvents();
         if (glfwGetKey(this->window.win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(this->window.win, GLFW_TRUE);
 
+        this->main_camera.process_glfw_event(this->window.win);
+
         if (this->window.resize_requested)
         {
             if (!this->resize_swapchain()) return false;
@@ -198,12 +203,14 @@ bool engine_t::run()
             compute_effect_t& selected = this->background_effects[this->current_bg_effect];
             ImGui::Text("Selected effect: %s", selected.name);
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
- 
+
             ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
+            /*
             ImGui::InputFloat4("data3", (float*) &selected.data.data3);
             ImGui::InputFloat4("data4", (float*) &selected.data.data4);
+            */
 
             ImGui::Text("Info:");
             ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
@@ -223,17 +230,30 @@ bool engine_t::run()
 
 void engine_t::update_scene()
 {
+    this->background_effects[0].data.data3.x = this->window.width;
+    this->background_effects[0].data.data3.y = this->window.height;
+    this->background_effects[0].data.data3.z = this->render_scale;
+    this->main_camera.update();
+
     this->main_draw_context.opaque_surfaces.clear();
 
     loaded_nodes["Suzanne"]->draw(glm::mat4(1.f), this->main_draw_context);
 
-    this->scene_data.gpu_data.view = glm::translate(glm::vec3(0, 0, -5)) * glm::rotate(glm::radians(180.f), glm::vec3(0, 1, 0));
-    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 100.f);
+    this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
+    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 1000.f);
     this->scene_data.gpu_data.proj[1][1] *= -1;
     this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view;
     this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
     this->scene_data.gpu_data.sunlight_color = glm::vec4(1.f);
     this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
+
+    for (int x = -3; x <= 3; x++) {
+
+		glm::mat4 scale = glm::scale(glm::vec3{0.2});
+		glm::mat4 translation =  glm::translate(glm::vec3{x, 2, 0});
+
+		this->loaded_nodes["Cube"]->draw(translation * scale, this->main_draw_context);
+	}
 }
 
 void engine_t::draw_geometry(vk::CommandBuffer cmd)
@@ -241,7 +261,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
     vk::RenderingAttachmentInfo depth_attachment(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
             vk::AttachmentStoreOp::eStore);
-    depth_attachment.clearValue.depthStencil.depth = 0.f;
+    depth_attachment.clearValue.depthStencil.depth = 1.f;
     vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment, &depth_attachment);
     cmd.beginRendering(render_info);
     

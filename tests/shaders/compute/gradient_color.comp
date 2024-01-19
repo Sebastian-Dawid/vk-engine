@@ -14,14 +14,16 @@ layout (push_constant) uniform constants
 void main()
 {
     ivec2 texel_coord = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(image);
+    // ivec2 size = imageSize(image);
 
     vec4 top_color = push_constants.data1;
     vec4 bottom_color = push_constants.data2;
+    vec2 size = push_constants.data3.xy;
+    float render_scale = push_constants.data3.z;
 
-    if (texel_coord.x < size.x && texel_coord.y < size.y)
+    if (texel_coord.x < size.x * render_scale && texel_coord.y < size.y * render_scale)
     {
-        float blend = float(texel_coord.y)/(size.y);
+        float blend = float(texel_coord.y)/(size.y * render_scale);
         imageStore(image, texel_coord, mix(top_color, bottom_color, blend));
     }
 }
