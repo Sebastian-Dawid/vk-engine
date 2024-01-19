@@ -8,6 +8,23 @@
 
 #include <glm/gtx/transform.hpp>
 
+void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
+{
+    glm::mat4 node_matrix = top_matrix * this->world_transform;
+    for (auto& s : mesh->surfaces)
+    {
+        render_object_t def{ .index_count = s.count,
+            .first_index = s.start_index,
+            .index_buffer = this->mesh->mesh_buffer.index_buffer.buffer,
+            .material = &s.material->data,
+            .transform = node_matrix,
+            .vertex_buffer_address = mesh->mesh_buffer.vertex_buffer_address
+        };
+        ctx.opaque_surfaces.push_back(def);
+    }
+    node_t::draw(top_matrix, ctx);
+}
+
 bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
 {
     auto vert_shader = vkutil::load_shader_module("tests/build/shaders/mesh.vert.spv", engine->device.dev);
@@ -204,6 +221,21 @@ bool engine_t::run()
     return true;
 }
 
+void engine_t::update_scene()
+{
+    this->main_draw_context.opaque_surfaces.clear();
+
+    loaded_nodes["Suzanne"]->draw(glm::mat4(1.f), this->main_draw_context);
+
+    this->scene_data.gpu_data.view = glm::translate(glm::vec3(0, 0, -5)) * glm::rotate(glm::radians(180.f), glm::vec3(0, 1, 0));
+    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 100.f);
+    this->scene_data.gpu_data.proj[1][1] *= -1;
+    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view;
+    this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
+    this->scene_data.gpu_data.sunlight_color = glm::vec4(1.f);
+    this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
+}
+
 void engine_t::draw_geometry(vk::CommandBuffer cmd)
 {
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
@@ -220,50 +252,42 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
     cmd.setScissor(0, scissor);
 
-    auto ret = create_buffer(sizeof(gpu_scene_data_t), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-    if (!ret.has_value()) return;
+    auto ret_buf = create_buffer(sizeof(gpu_scene_data_t), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    if (!ret_buf.has_value()) return;
 
+    allocated_buffer_t gpu_scene_data_buffer = ret_buf.value();
+    this->get_current_frame().deletion_queue.push_function([=, this]() {
+            this->destroy_buffer(gpu_scene_data_buffer);
+            });
+
+    gpu_scene_data_t* scene_uniform_data = (gpu_scene_data_t*)gpu_scene_data_buffer.info.pMappedData;
+    *scene_uniform_data = this->scene_data.gpu_data;
+
+    auto ret = this->get_current_frame().frame_descriptors.allocate(this->device.dev, this->scene_data.layout);
+    if (!ret_buf.has_value())
     {
-        allocated_buffer_t gpu_scene_data_buffer = ret.value();
-        this->get_current_frame().deletion_queue.push_function([=, this]() {
-                this->destroy_buffer(gpu_scene_data_buffer);
-                });
-
-        gpu_scene_data_t* scene_uniform_data = (gpu_scene_data_t*)gpu_scene_data_buffer.info.pMappedData;
-        *scene_uniform_data = this->scene_data.gpu_data;
-        
-        auto ret = this->get_current_frame().frame_descriptors.allocate(this->device.dev, this->scene_data.layout);
-        if (ret.has_value())
-        {
-            vk::DescriptorSet global_descriptor = ret.value();
-            descriptor_writer_t writer;
-            writer.write_buffer(0, gpu_scene_data_buffer.buffer, sizeof(gpu_scene_data_t), 0, vk::DescriptorType::eUniformBuffer);
-            writer.update_set(this->device.dev, global_descriptor);
-        }
+        cmd.endRendering();
+        return;
     }
 
-    auto image_set = this->get_current_frame().frame_descriptors.allocate(this->device.dev, this->single_image_descriptor_layout);
+    vk::DescriptorSet global_descriptor = ret.value();
+    descriptor_writer_t writer;
+    writer.write_buffer(0, gpu_scene_data_buffer.buffer, sizeof(gpu_scene_data_t), 0, vk::DescriptorType::eUniformBuffer);
+    writer.update_set(this->device.dev, global_descriptor);
+
+    for (const render_object_t& draw : this->main_draw_context.opaque_surfaces)
     {
-        descriptor_writer_t writer;
-        writer.write_image(0, this->error_checkerboard_image.view, this->default_sampler_nearest,
-                vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
-        writer.update_set(this->device.dev, image_set.value());
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->pipeline);
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->layout, 0, global_descriptor, {});
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->layout, 1, draw.material->material_set, {});
+
+        cmd.bindIndexBuffer(draw.index_buffer, 0, vk::IndexType::eUint32);
+
+        gpu_draw_push_constants_t push_constants{ .world = draw.transform, .vertex_buffer = draw.vertex_buffer_address };
+        cmd.pushConstants(draw.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
+
+        cmd.drawIndexed(draw.index_count, 1, draw.first_index, 0, 0);
     }
-
-    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, this->mesh_pipeline.layout, 0, image_set.value(), {});
-
-    gpu_draw_push_constants_t push_constants;
-
-    glm::mat4 model = glm::rotate(glm::radians(180.f), glm::vec3(0, 1, 0));
-    glm::mat4 view = glm::translate(glm::vec3(0, 0, -5));
-    glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)this->draw_extent.width / (float)this->draw_extent.height, .1f, 100.f);
-    projection[1][1] *= -1;
-    push_constants.world = projection * view * model;
-    push_constants.vertex_buffer = this->test_meshes[2]->mesh_buffer.vertex_buffer_address;
-
-    cmd.pushConstants(this->mesh_pipeline.layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
-    cmd.bindIndexBuffer(this->test_meshes[2]->mesh_buffer.index_buffer.buffer, 0, vk::IndexType::eUint32);
-    cmd.drawIndexed(this->test_meshes[2]->surfaces[0].count, 1, this->test_meshes[2]->surfaces[0].start_index, 0, 0);
 
     cmd.endRendering();
 }
@@ -289,6 +313,8 @@ void engine_t::draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view
 
 bool engine_t::draw()
 {
+    this->update_scene();
+
     vk::Result result = this->device.dev.waitForFences(this->get_current_frame().render_fence, true, 1000000000);
     if (result != vk::Result::eSuccess)
     {
@@ -979,6 +1005,21 @@ bool engine_t::init_default_data()
     auto ret = metal_rough_material.write_material(this->device.dev, material_pass_e::MAIN_COLOR, material_resources, this->global_descriptor_allocator);
     if (!ret.has_value()) return false;
     this->default_data = ret.value();
+
+    for (auto& m : test_meshes)
+    {
+        std::shared_ptr<mesh_node_t> new_node = std::make_shared<mesh_node_t>();
+        new_node->mesh = m;
+        new_node->local_transform = glm::mat4(1.f);
+        new_node->world_transform = glm::mat4(1.f);
+
+        for (auto& s : new_node->mesh->surfaces)
+        {
+            s.material = std::make_shared<gltf_material_t>(this->default_data);
+        }
+
+        this->loaded_nodes[m->name] = std::move(new_node);
+    }
 
     return true;
 }

@@ -61,3 +61,36 @@ struct material_instance_t
     vk::DescriptorSet material_set;
     material_pass_e pass_type;
 };
+
+struct draw_context_t;
+
+struct renderable_i
+{
+    virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) = 0;
+};
+
+struct node_t : public renderable_i
+{
+    std::weak_ptr<node_t> parent;
+    std::vector<std::shared_ptr<node_t>> children;
+
+    glm::mat4 local_transform;
+    glm::mat4 world_transform;
+
+    void refresh_transform(const glm::mat4& parent_matrix)
+    {
+        this->world_transform = parent_matrix * this->local_transform;
+        for (auto c : this->children)
+        {
+            c->refresh_transform(this->world_transform);
+        }
+    }
+
+    virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) override
+    {
+        for (auto& c : this->children)
+        {
+            c->draw(top_matrix, ctx);
+        }
+    }
+};

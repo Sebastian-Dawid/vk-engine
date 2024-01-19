@@ -14,6 +14,30 @@
 
 #include <glm/glm.hpp>
 
+struct mesh_node_t : public node_t
+{
+    std::shared_ptr<mesh_asset_t> mesh;
+    virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) override;
+    virtual ~mesh_node_t() {};
+};
+
+struct render_object_t
+{
+    std::uint32_t index_count;
+    std::uint32_t first_index;
+    vk::Buffer index_buffer;
+
+    material_instance_t* material;
+
+    glm::mat4 transform;
+    vk::DeviceAddress vertex_buffer_address;
+};
+
+struct draw_context_t
+{
+    std::vector<render_object_t> opaque_surfaces;
+};
+
 struct gltf_metallic_roughness
 {
     material_pipeline_t opaque_pipeline;
@@ -193,6 +217,9 @@ struct engine_t
     material_instance_t default_data;
     gltf_metallic_roughness metal_rough_material;
 
+    draw_context_t main_draw_context;
+    std::unordered_map<std::string, std::shared_ptr<node_t>> loaded_nodes;
+
     bool init_vulkan();
     bool init_commands();
     bool init_sync_structures();
@@ -218,6 +245,8 @@ struct engine_t
     std::optional<gpu_mesh_buffer_t> upload_mesh(std::span<std::uint32_t> indicies, std::span<vertex_t> vertices);
 
     frame_data_t& get_current_frame();
+
+    void update_scene();
 
     void draw_geometry(vk::CommandBuffer cmd);
     void draw_background(vk::CommandBuffer cmd);

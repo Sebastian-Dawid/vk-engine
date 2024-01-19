@@ -105,7 +105,7 @@ std::optional<std::vector<std::shared_ptr<mesh_asset_t>>> load_gltf_meshes(engin
 
             new_mesh.surfaces.push_back(new_surface);
         }
-        constexpr bool override_colors = true;
+        constexpr bool override_colors = false;
         if (override_colors)
         {
             for (vertex_t& vtx : vertices) vtx.color = glm::vec4(vtx.normal, 1.f);

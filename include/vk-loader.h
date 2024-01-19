@@ -6,10 +6,16 @@
 #include <unordered_map>
 #include <filesystem>
 
+struct gltf_material_t
+{
+    material_instance_t data;
+};
+
 struct surface_t
 {
     std::uint32_t start_index;
     std::uint32_t count;
+    std::shared_ptr<gltf_material_t> material;
 };
 
 struct mesh_asset_t

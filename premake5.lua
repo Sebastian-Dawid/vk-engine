@@ -32,7 +32,9 @@ workspace "template"
         kind "StaticLib"
         language "C++"
         targetdir "build/lib/%{cfg.buildcfg}"
-        buildoptions { "-Wall", "-Werror" }
+        buildoptions { "-Wall" }
+        filter "configurations:Release"
+            buildoptions { "-Werror" }
 
         filter "files:src/vk-mem-alloc/vk_mem_alloc.cpp"
             buildoptions { "-w" }
