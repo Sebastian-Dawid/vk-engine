@@ -33,7 +33,7 @@ struct gltf_metallic_roughness
         allocated_image_t color_image;
         vk::Sampler color_sampler;
         allocated_image_t metal_rough_image;
-        vk::Sampler metal_rought_sampler;
+        vk::Sampler metal_rough_sampler;
         vk::Buffer data_buffer;
         std::uint32_t data_buffer_offset;
     };
@@ -43,7 +43,7 @@ struct gltf_metallic_roughness
     bool build_pipelines(engine_t* engine);
     void clear_resources(vk::Device device);
 
-    material_instance_t write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
+    std::optional<material_instance_t> write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
             descriptor_allocator_growable_t& descriptor_allocator);
 };
 
@@ -143,7 +143,7 @@ struct engine_t
 
     deletion_queue_t main_deletion_queue;
 
-    descriptor_allocator_t global_descriptor_allocator;
+    descriptor_allocator_growable_t global_descriptor_allocator;
     struct
     {
         vk::DescriptorSet set;
@@ -189,6 +189,9 @@ struct engine_t
     std::uint32_t current_bg_effect = 0;
 
     vk::DescriptorSetLayout single_image_descriptor_layout;
+
+    material_instance_t default_data;
+    gltf_metallic_roughness metal_rough_material;
 
     bool init_vulkan();
     bool init_commands();

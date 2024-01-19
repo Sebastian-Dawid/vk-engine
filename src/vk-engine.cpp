@@ -60,7 +60,34 @@ bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
     engine->device.dev.destroyShaderModule(vert_shader.value());
     engine->device.dev.destroyShaderModule(frag_shader.value());
 
+    engine->main_deletion_queue.push_function([=, this]() {
+            engine->device.dev.destroyDescriptorSetLayout(this->material_layout);
+            engine->device.dev.destroyPipelineLayout(this->opaque_pipeline.layout);
+            engine->device.dev.destroyPipeline(this->opaque_pipeline.pipeline);
+            engine->device.dev.destroyPipeline(this->transparent_pipeline.pipeline);
+            });
+
     return true;
+}
+
+std::optional<material_instance_t> gltf_metallic_roughness::write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
+        descriptor_allocator_growable_t& descriptor_allocator)
+{
+    material_instance_t material;
+    material.pass_type = pass;
+    material.pipeline = (pass == material_pass_e::TRANSPARENT) ? &this->transparent_pipeline : &this->opaque_pipeline;
+    auto ret = descriptor_allocator.allocate(device, this->material_layout);
+    if (!ret.has_value()) return std::nullopt;
+    material.material_set = ret.value();
+
+    this->writer.clear();
+    this->writer.write_buffer(0, resources.data_buffer, sizeof(material_constants_t), resources.data_buffer_offset, vk::DescriptorType::eUniformBuffer);
+    this->writer.write_image(1, resources.color_image.view, resources.color_sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
+    this->writer.write_image(2, resources.metal_rough_image.view, resources.metal_rough_sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
+
+    this->writer.update_set(device, material.material_set);
+
+    return material;
 }
 
 void deletion_queue_t::push_function(std::function<void()>&& function)
@@ -646,8 +673,9 @@ bool engine_t::init_sync_structures()
 
 bool engine_t::init_descriptors()
 {
-    std::vector<descriptor_allocator_t::pool_size_ratio_t> sizes = { { vk::DescriptorType::eStorageImage, 1 } };
-    this->global_descriptor_allocator.init_pool(this->device.dev, 10, sizes);
+    std::vector<descriptor_allocator_growable_t::pool_size_ratio_t> sizes = { { vk::DescriptorType::eStorageImage, 1 } };
+    if (!this->global_descriptor_allocator.init(this->device.dev, 10, sizes)) return false;
+
     {
         descriptor_layout_builder_t builder;
         auto ret = builder.add_binding(0, vk::DescriptorType::eStorageImage).build(this->device.dev, vk::ShaderStageFlagBits::eCompute);
@@ -702,7 +730,7 @@ bool engine_t::init_descriptors()
             this->device.dev.destroyDescriptorSetLayout(this->scene_data.layout);
             this->device.dev.destroyDescriptorSetLayout(this->draw_descriptor.layout);
             this->device.dev.destroyDescriptorSetLayout(this->single_image_descriptor_layout);
-            this->global_descriptor_allocator.destroy_pool(this->device.dev);
+            this->global_descriptor_allocator.destroy_pools(this->device.dev);
             });
 
     return true;
@@ -711,7 +739,8 @@ bool engine_t::init_descriptors()
 bool engine_t::init_pipelines()
 {
     if (!this->init_mesh_pipeline()) return false;
-    return this->init_background_pipelines();
+    if (!this->init_background_pipelines()) return false;
+    return this->metal_rough_material.build_pipelines(this);
 }
 
 bool engine_t::init_mesh_pipeline()
@@ -870,9 +899,9 @@ bool engine_t::init_imgui()
 
 bool engine_t::init_default_data()
 {
-    auto ret = load_gltf_meshes(this, "tests/assets/basicmesh.glb");
-    if (!ret.has_value()) return false;
-    this->test_meshes = ret.value();
+    auto ret_mesh = load_gltf_meshes(this, "tests/assets/basicmesh.glb");
+    if (!ret_mesh.has_value()) return false;
+    this->test_meshes = ret_mesh.value();
 
     std::uint32_t white = 0xFFFFFFFF;
     auto wi = this->create_image((void*)&white, vk::Extent3D(1, 1, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
@@ -915,7 +944,7 @@ bool engine_t::init_default_data()
         fmt::print(stderr, "[ {} ]\tFailed to create sampler!\n", ERROR_FMT("ERROR"));
         return false;
     }
-    
+
     this->main_deletion_queue.push_function([&]() {
             this->destroy_image(this->white_image);
             this->destroy_image(this->grey_image);
@@ -924,6 +953,32 @@ bool engine_t::init_default_data()
             this->device.dev.destroySampler(this->default_sampler_nearest);
             this->device.dev.destroySampler(this->default_sampler_linear);
             });
+
+    gltf_metallic_roughness::material_resources_t material_resources{
+        .color_image = this->white_image,
+        .color_sampler = this->default_sampler_linear,
+        .metal_rough_image = this->white_image,
+        .metal_rough_sampler = this->default_sampler_linear
+    };
+
+    auto material_constants = this->create_buffer(sizeof(gltf_metallic_roughness::material_constants_t),
+            vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    if (!material_constants.has_value()) return false;
+
+    gltf_metallic_roughness::material_constants_t* scene_uniform_data = (gltf_metallic_roughness::material_constants_t*)material_constants.value().info.pMappedData;
+    scene_uniform_data->color_factors = glm::vec4(1, 1, 1, 1);
+    scene_uniform_data->metal_rought_factors = glm::vec4(1, 0.5, 0, 0);
+
+    this->main_deletion_queue.push_function([=, this]() {
+            this->destroy_buffer(material_constants.value());
+            });
+
+    material_resources.data_buffer = material_constants.value().buffer;
+    material_resources.data_buffer_offset = 0;
+
+    auto ret = metal_rough_material.write_material(this->device.dev, material_pass_e::MAIN_COLOR, material_resources, this->global_descriptor_allocator);
+    if (!ret.has_value()) return false;
+    this->default_data = ret.value();
 
     return true;
 }

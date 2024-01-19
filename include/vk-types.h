@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <memory>
 #include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 
