@@ -93,4 +93,5 @@ struct node_t : public renderable_i
             c->draw(top_matrix, ctx);
         }
     }
+    virtual ~node_t(){};
 };

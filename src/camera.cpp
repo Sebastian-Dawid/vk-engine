@@ -10,7 +10,7 @@ void camera_t::update()
     float delta_time = current_time - last_frame;
     last_frame = current_time;
     glm::mat4 camera_rotation = this->get_rotation_matrix();
-    this->position += glm::vec3(camera_rotation * glm::vec4(this->velocity * delta_time, 0.f));
+    this->position += glm::vec3(camera_rotation * glm::vec4(this->velocity * this->speed * delta_time, 0.f));
 }
 
 void camera_t::process_glfw_event(GLFWwindow* window)

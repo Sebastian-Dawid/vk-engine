@@ -9,6 +9,7 @@ struct camera_t
     glm::vec3 position;
     float pitch {0.f};
     float yaw {0.f};
+    float speed = 1.f;
 
     glm::mat4 get_view_matrix();
     glm::mat4 get_rotation_matrix();

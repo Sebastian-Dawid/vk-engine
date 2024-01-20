@@ -25,7 +25,7 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
     node_t::draw(top_matrix, ctx);
 }
 
-bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
+bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine)
 {
     auto vert_shader = vkutil::load_shader_module("tests/build/shaders/mesh.vert.spv", engine->device.dev);
     if (!vert_shader.has_value()) return false;
@@ -69,7 +69,7 @@ bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
     if (!ret_pipeline.has_value()) return false;
     this->opaque_pipeline.pipeline = ret_pipeline.value();
     ret_pipeline = pipeline_builder.enable_blending_additive()
-        .enable_depthtest(false, vk::CompareOp::eGreaterOrEqual)
+        .enable_depthtest(false, vk::CompareOp::eLess)
         .build(engine->device.dev);
     if (!ret_pipeline.has_value()) return false;
     this->transparent_pipeline.pipeline = ret_pipeline.value();
@@ -87,7 +87,7 @@ bool gltf_metallic_roughness::build_pipelines(engine_t* engine)
     return true;
 }
 
-std::optional<material_instance_t> gltf_metallic_roughness::write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
+std::optional<material_instance_t> gltf_metallic_roughness_t::write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
         descriptor_allocator_growable_t& descriptor_allocator)
 {
     material_instance_t material;
@@ -140,7 +140,7 @@ engine_t::engine_t()
     this->window.width = 1024;
     this->window.height = 1024;
     loaded_engine = this;
-    this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(0.f, 0.f, 5.f), .pitch = 0, .yaw = 0 };
+    this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(30.f, -0.0f, -085.f), .pitch = 0, .yaw = 0 };
     glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
     glfwSetWindowUserPointer(this->window.win, &this->main_camera);
     glfwSetCursorPosCallback(this->window.win, cursor_pos_callback);
@@ -156,6 +156,8 @@ engine_t::~engine_t()
             fmt::print(stderr, "[ {} ]\tWaiting on device to finish failed!\n", ERROR_FMT("ERROR"));
             abort();
         }
+
+        this->loaded_scenes.clear();
 
         for (std::size_t i = 0; i < FRAME_OVERLAP; ++i)
         {
@@ -205,6 +207,7 @@ bool engine_t::run()
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
 
             ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
+            ImGui::SliderFloat("Cam Speed",&this->main_camera.speed, 1.f, 10.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
             /*
@@ -236,8 +239,9 @@ void engine_t::update_scene()
     this->main_camera.update();
 
     this->main_draw_context.opaque_surfaces.clear();
+    this->main_draw_context.transparent_surfaces.clear();
 
-    loaded_nodes["Suzanne"]->draw(glm::mat4(1.f), this->main_draw_context);
+    loaded_scenes["structure"]->draw(glm::mat4(1.f), this->main_draw_context);
 
     this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
     this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 1000.f);
@@ -246,14 +250,6 @@ void engine_t::update_scene()
     this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
     this->scene_data.gpu_data.sunlight_color = glm::vec4(1.f);
     this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
-
-    for (int x = -3; x <= 3; x++) {
-
-		glm::mat4 scale = glm::scale(glm::vec3{0.2});
-		glm::mat4 translation =  glm::translate(glm::vec3{x, 2, 0});
-
-		this->loaded_nodes["Cube"]->draw(translation * scale, this->main_draw_context);
-	}
 }
 
 void engine_t::draw_geometry(vk::CommandBuffer cmd)
@@ -295,7 +291,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     writer.write_buffer(0, gpu_scene_data_buffer.buffer, sizeof(gpu_scene_data_t), 0, vk::DescriptorType::eUniformBuffer);
     writer.update_set(this->device.dev, global_descriptor);
 
-    for (const render_object_t& draw : this->main_draw_context.opaque_surfaces)
+    auto draw = [&](const render_object_t& draw)
     {
         cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->pipeline);
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->layout, 0, global_descriptor, {});
@@ -307,7 +303,10 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
         cmd.pushConstants(draw.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
 
         cmd.drawIndexed(draw.index_count, 1, draw.first_index, 0, 0);
-    }
+    };
+
+    for (auto& r : this->main_draw_context.opaque_surfaces) draw(r);
+    for (auto& r : this->main_draw_context.transparent_surfaces) draw(r);
 
     cmd.endRendering();
 }
@@ -628,6 +627,10 @@ bool engine_t::init_vulkan()
     if (!this->init_imgui()) return false;
     if (!this->init_default_data()) return false;
 
+    auto structured_file = load_gltf(this, "tests/assets/structure.glb");
+    if (!structured_file.has_value()) return false;
+    this->loaded_scenes["structure"] = structured_file.value();
+
     this->initialized = true;
     return true;
 }
@@ -945,9 +948,9 @@ bool engine_t::init_imgui()
 
 bool engine_t::init_default_data()
 {
-    auto ret_mesh = load_gltf_meshes(this, "tests/assets/basicmesh.glb");
+    /*auto ret_mesh = load_gltf(this, "tests/assets/basicmesh.glb");
     if (!ret_mesh.has_value()) return false;
-    this->test_meshes = ret_mesh.value();
+    this->test_meshes = ret_mesh.value();*/
 
     std::uint32_t white = 0xFFFFFFFF;
     auto wi = this->create_image((void*)&white, vk::Extent3D(1, 1, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
@@ -1000,18 +1003,18 @@ bool engine_t::init_default_data()
             this->device.dev.destroySampler(this->default_sampler_linear);
             });
 
-    gltf_metallic_roughness::material_resources_t material_resources{
+    gltf_metallic_roughness_t::material_resources_t material_resources{
         .color_image = this->white_image,
         .color_sampler = this->default_sampler_linear,
         .metal_rough_image = this->white_image,
         .metal_rough_sampler = this->default_sampler_linear
     };
 
-    auto material_constants = this->create_buffer(sizeof(gltf_metallic_roughness::material_constants_t),
+    auto material_constants = this->create_buffer(sizeof(gltf_metallic_roughness_t::material_constants_t),
             vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
     if (!material_constants.has_value()) return false;
 
-    gltf_metallic_roughness::material_constants_t* scene_uniform_data = (gltf_metallic_roughness::material_constants_t*)material_constants.value().info.pMappedData;
+    gltf_metallic_roughness_t::material_constants_t* scene_uniform_data = (gltf_metallic_roughness_t::material_constants_t*)material_constants.value().info.pMappedData;
     scene_uniform_data->color_factors = glm::vec4(1, 1, 1, 1);
     scene_uniform_data->metal_rought_factors = glm::vec4(1, 0.5, 0, 0);
 
@@ -1026,7 +1029,7 @@ bool engine_t::init_default_data()
     if (!ret.has_value()) return false;
     this->default_data = ret.value();
 
-    for (auto& m : test_meshes)
+    /*for (auto& m : test_meshes)
     {
         std::shared_ptr<mesh_node_t> new_node = std::make_shared<mesh_node_t>();
         new_node->mesh = m;
@@ -1039,7 +1042,7 @@ bool engine_t::init_default_data()
         }
 
         this->loaded_nodes[m->name] = std::move(new_node);
-    }
+    }*/
 
     return true;
 }
@@ -1261,11 +1264,6 @@ std::optional<gpu_mesh_buffer_t> engine_t::upload_mesh(std::span<std::uint32_t> 
             });
 
     this->destroy_buffer(staging.value());
-
-    this->main_deletion_queue.push_function([=, this](){
-            this->destroy_buffer(buf.index_buffer);
-            this->destroy_buffer(buf.vertex_buffer);
-            });
 
     return buf;
 }

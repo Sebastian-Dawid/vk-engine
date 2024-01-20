@@ -37,9 +37,10 @@ struct render_object_t
 struct draw_context_t
 {
     std::vector<render_object_t> opaque_surfaces;
+    std::vector<render_object_t> transparent_surfaces;
 };
 
-struct gltf_metallic_roughness
+struct gltf_metallic_roughness_t
 {
     material_pipeline_t opaque_pipeline;
     material_pipeline_t transparent_pipeline;
@@ -218,10 +219,10 @@ struct engine_t
     vk::DescriptorSetLayout single_image_descriptor_layout;
 
     material_instance_t default_data;
-    gltf_metallic_roughness metal_rough_material;
+    gltf_metallic_roughness_t metal_rough_material;
 
     draw_context_t main_draw_context;
-    std::unordered_map<std::string, std::shared_ptr<node_t>> loaded_nodes;
+    std::unordered_map<std::string, std::shared_ptr<loaded_gltf_t>> loaded_scenes;
 
     bool init_vulkan();
     bool init_commands();
