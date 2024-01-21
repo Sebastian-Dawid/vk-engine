@@ -7,6 +7,40 @@
 #include <backends/imgui_impl_vulkan.h>
 
 #include <glm/gtx/transform.hpp>
+#include <chrono>
+
+bool is_visible(const render_object_t& obj, const glm::mat4& viewproj)
+{
+    std::array<glm::vec3, 8> corners {
+        glm::vec3( 1,  1,  1),
+        glm::vec3( 1,  1, -1),
+        glm::vec3( 1, -1,  1),
+        glm::vec3( 1, -1, -1),
+        glm::vec3(-1,  1,  1),
+        glm::vec3(-1,  1, -1),
+        glm::vec3(-1, -1,  1),
+        glm::vec3(-1, -1, -1),
+    };
+
+    glm::mat4 matrix = viewproj * obj.transform;
+
+    glm::vec3 min( 1.5,  1.5,  1.5);
+    glm::vec3 max(-1.5, -1.5, -1.5);
+
+    for (auto& c : corners)
+    {
+        glm::vec4 v = matrix * glm::vec4(obj.bounds.origin + (c * obj.bounds.extents), 1.f);
+        v.x = v.x / v.w;
+        v.y = v.y / v.y;
+        v.z = v.z / v.w;
+
+        min = glm::min(glm::vec3(v), min);
+        max = glm::max(glm::vec3(v), max);
+    }
+
+    if (min.z > 1.f || max.z < 0.f || min.x > 1.f || max.x < -1.f || min.y > 1.f || max.y < -1.f) return false;
+    return true;
+}
 
 void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
 {
@@ -17,6 +51,7 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
             .first_index = s.start_index,
             .index_buffer = this->mesh->mesh_buffer.index_buffer.buffer,
             .material = &s.material->data,
+            .bounds = s.bounds,
             .transform = node_matrix,
             .vertex_buffer_address = mesh->mesh_buffer.vertex_buffer_address
         };
@@ -187,6 +222,8 @@ bool engine_t::run()
 {
     while (!glfwWindowShouldClose(this->window.win))
     {
+        auto start = std::chrono::system_clock::now();
+
         glfwPollEvents();
         if (glfwGetKey(this->window.win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(this->window.win, GLFW_TRUE);
 
@@ -205,27 +242,43 @@ bool engine_t::run()
             compute_effect_t& selected = this->background_effects[this->current_bg_effect];
             ImGui::Text("Selected effect: %s", selected.name);
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
-
-            ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
-            ImGui::SliderFloat("Cam Speed",&this->main_camera.speed, 1.f, 10.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
+
+            ImGui::Text("Info:");
+            ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
+            ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
+            ImGui::Text("Window Resolution: (%d, %d)", this->swapchain.extent.width, this->swapchain.extent.height);
+            ImGui::Text("Buffer Resolution: (%d, %d)", this->draw_image.extent.width, this->draw_image.extent.height);
+
+            ImGui::Text("Misc:");
+            ImGui::SliderFloat("Cam Speed",&this->main_camera.speed, 1.f, 10.f);
             /*
             ImGui::InputFloat4("data3", (float*) &selected.data.data3);
             ImGui::InputFloat4("data4", (float*) &selected.data.data4);
             */
 
-            ImGui::Text("Info:");
-            ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
-            ImGui::Text("Window Resolution: (%d, %d)", this->swapchain.extent.width, this->swapchain.extent.height);
-            ImGui::Text("Buffer Resolution: (%d, %d)", this->draw_image.extent.width, this->draw_image.extent.height);
-
             ImGui::End();
         }
+
+        if (ImGui::Begin("Stats"))
+        {
+            ImGui::Text("Frametime:   %f ms", this->stats.fram_time);
+            ImGui::Text("Draw time:   %f ms", this->stats.mesh_draw_time);
+            ImGui::Text("Update time: %f ms", this->stats.scene_update_time);
+            ImGui::Text("Triangles:   %i", this->stats.triangle_count);
+            ImGui::Text("Draws:       %i", this->stats.drawcall_count);
+            ImGui::End();
+        }
+
         //ImGui::ShowDemoWindow();
         ImGui::Render();
 
         if (!draw()) return false;
+
+        auto end = std::chrono::system_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        this->stats.fram_time = elapsed.count() / 1000.f;
     }
 
     return true;
@@ -233,6 +286,8 @@ bool engine_t::run()
 
 void engine_t::update_scene()
 {
+    auto start = std::chrono::system_clock::now();
+
     this->background_effects[0].data.data3.x = this->window.width;
     this->background_effects[0].data.data3.y = this->window.height;
     this->background_effects[0].data.data3.z = this->render_scale;
@@ -250,23 +305,42 @@ void engine_t::update_scene()
     this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
     this->scene_data.gpu_data.sunlight_color = glm::vec4(1.f);
     this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
+
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    this->stats.scene_update_time = elapsed.count() / 1000.f;
 }
 
 void engine_t::draw_geometry(vk::CommandBuffer cmd)
 {
+    this->stats.drawcall_count = 0;
+    this->stats.triangle_count = 0;
+    auto start = std::chrono::system_clock::now();
+
+    std::vector<std::uint32_t> opaque_draws;
+    opaque_draws.reserve(this->main_draw_context.opaque_surfaces.size());
+
+    for (std::uint32_t i = 0; i < this->main_draw_context.opaque_surfaces.size(); ++i)
+    {
+        // NOTE: Frustum culling on small scenes appears to perform worse than just rendering offscreen objects too.
+        // TODO: Needs further testing.
+        if (is_visible(this->main_draw_context.opaque_surfaces[i], this->scene_data.gpu_data.viewproj))
+            opaque_draws.push_back(i);
+    }
+
+    std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
+            const render_object_t& a = this->main_draw_context.opaque_surfaces[i];
+            const render_object_t& b = this->main_draw_context.opaque_surfaces[j];
+            if (a.material == b.material) return a.index_buffer < b.index_buffer;
+            return a.material < b.material;
+        });
+
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
     vk::RenderingAttachmentInfo depth_attachment(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
             vk::AttachmentStoreOp::eStore);
     depth_attachment.clearValue.depthStencil.depth = 1.f;
     vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment, &depth_attachment);
     cmd.beginRendering(render_info);
-    
-    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, this->mesh_pipeline.pipeline);
-    
-    vk::Viewport viewport(0, 0, this->draw_extent.width, this->draw_extent.height, 0, 1);
-    cmd.setViewport(0, viewport);
-    vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
-    cmd.setScissor(0, scissor);
 
     auto ret_buf = create_buffer(sizeof(gpu_scene_data_t), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
     if (!ret_buf.has_value()) return;
@@ -291,24 +365,54 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     writer.write_buffer(0, gpu_scene_data_buffer.buffer, sizeof(gpu_scene_data_t), 0, vk::DescriptorType::eUniformBuffer);
     writer.update_set(this->device.dev, global_descriptor);
 
-    auto draw = [&](const render_object_t& draw)
+    material_pipeline_t* last_pipeline = nullptr;
+    material_instance_t* last_material = nullptr;
+    vk::Buffer last_index_buffer = {};
+
+    auto draw = [&](const render_object_t& obj)
     {
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->pipeline);
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->layout, 0, global_descriptor, {});
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, draw.material->pipeline->layout, 1, draw.material->material_set, {});
+        if (obj.material != last_material)
+        {
+            last_material = obj.material;
+            if (obj.material->pipeline != last_pipeline)
+            {
+                last_pipeline = obj.material->pipeline;
+                cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, obj.material->pipeline->pipeline);
+                cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, obj.material->pipeline->layout, 0, global_descriptor, {});
 
-        cmd.bindIndexBuffer(draw.index_buffer, 0, vk::IndexType::eUint32);
+                vk::Viewport viewport(0, 0, this->draw_extent.width, this->draw_extent.height, 0, 1);
+                cmd.setViewport(0, viewport);
+                vk::Rect2D scissor(vk::Offset2D(0, 0), this->draw_extent);
+                cmd.setScissor(0, scissor);
+            }
 
-        gpu_draw_push_constants_t push_constants{ .world = draw.transform, .vertex_buffer = draw.vertex_buffer_address };
-        cmd.pushConstants(draw.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
+            cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, obj.material->pipeline->layout, 1, obj.material->material_set, {});
+        }
+        if (obj.index_buffer != last_index_buffer)
+        {
+            last_index_buffer = obj.index_buffer;
+            cmd.bindIndexBuffer(obj.index_buffer, 0, vk::IndexType::eUint32);
+        }
 
-        cmd.drawIndexed(draw.index_count, 1, draw.first_index, 0, 0);
+        gpu_draw_push_constants_t push_constants{ .world = obj.transform, .vertex_buffer = obj.vertex_buffer_address };
+        cmd.pushConstants(obj.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
+        cmd.drawIndexed(obj.index_count, 1, obj.first_index, 0, 0);
+
+        this->stats.drawcall_count++;
+        this->stats.triangle_count += obj.index_count / 3;
     };
 
-    for (auto& r : this->main_draw_context.opaque_surfaces) draw(r);
+    for (auto& r : opaque_draws)
+    {
+        draw(this->main_draw_context.opaque_surfaces[r]);
+    }
     for (auto& r : this->main_draw_context.transparent_surfaces) draw(r);
 
     cmd.endRendering();
+
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    this->stats.mesh_draw_time = elapsed.count() / 1000.f;
 }
 
 void engine_t::draw_background(vk::CommandBuffer cmd)
@@ -1216,7 +1320,10 @@ std::optional<allocated_image_t> engine_t::create_image(void* data, vk::Extent3D
             vk::BufferImageCopy copy_region(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1), {}, size);
             cmd.copyBufferToImage(upload_buffer.value().buffer, new_img.value().image, vk::ImageLayout::eTransferDstOptimal, copy_region);
 
-            vkutil::transition_image(cmd, new_img.value().image, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+            if (mipmapped)
+                vkutil::generate_mipmaps(cmd, new_img.value().image, vk::Extent2D(new_img.value().extent.width, new_img.value().extent.height));
+            else
+                vkutil::transition_image(cmd, new_img.value().image, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
             });
 
     this->destroy_buffer(upload_buffer.value());

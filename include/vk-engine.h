@@ -15,6 +15,15 @@
 #include <glm/glm.hpp>
 #include <camera.h>
 
+struct engine_stats_t
+{
+    float fram_time;
+    std::uint32_t triangle_count;
+    std::uint32_t drawcall_count;
+    float scene_update_time;
+    float mesh_draw_time;
+};
+
 struct mesh_node_t : public node_t
 {
     std::shared_ptr<mesh_asset_t> mesh;
@@ -29,7 +38,7 @@ struct render_object_t
     vk::Buffer index_buffer;
 
     material_instance_t* material;
-
+    bounds_t bounds;
     glm::mat4 transform;
     vk::DeviceAddress vertex_buffer_address;
 };
@@ -223,6 +232,8 @@ struct engine_t
 
     draw_context_t main_draw_context;
     std::unordered_map<std::string, std::shared_ptr<loaded_gltf_t>> loaded_scenes;
+
+    engine_stats_t stats;
 
     bool init_vulkan();
     bool init_commands();

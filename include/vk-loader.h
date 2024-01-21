@@ -11,10 +11,18 @@ struct gltf_material_t
     material_instance_t data;
 };
 
+struct bounds_t
+{
+    glm::vec3 origin;
+    float sphere_radius;
+    glm::vec3 extents;
+};
+
 struct surface_t
 {
     std::uint32_t start_index;
     std::uint32_t count;
+    bounds_t bounds;
     std::shared_ptr<gltf_material_t> material;
 };
 

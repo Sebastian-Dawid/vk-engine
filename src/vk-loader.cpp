@@ -28,7 +28,7 @@ std::optional<allocated_image_t> load_image(engine_t* engine, fastgltf::Asset& a
                 if (data)
                 {
                     vk::Extent3D image_size(width, height, 1);
-                    auto ret = engine->create_image(data, image_size, vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+                    auto ret = engine->create_image(data, image_size, vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled, true);
                     assert(ret.has_value());
                     new_image = ret.value();
                     stbi_image_free(data);
@@ -39,7 +39,7 @@ std::optional<allocated_image_t> load_image(engine_t* engine, fastgltf::Asset& a
                 if (data)
                 {
                     vk::Extent3D image_size(width, height, 1);
-                    auto ret = engine->create_image(data, image_size, vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+                    auto ret = engine->create_image(data, image_size, vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled, true);
                     assert(ret.has_value());
                     new_image = ret.value();
                     stbi_image_free(data);
@@ -59,7 +59,7 @@ std::optional<allocated_image_t> load_image(engine_t* engine, fastgltf::Asset& a
                             if (data)
                             {
                                 vk::Extent3D image_size(width, height, 1);
-                                auto ret = engine->create_image(data, image_size, vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
+                                auto ret = engine->create_image(data, image_size, vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled, true);
                                 assert(ret.has_value());
                                 new_image = ret.value();
                                 stbi_image_free(data);
@@ -105,7 +105,7 @@ vk::SamplerMipmapMode extract_mipmap_mode(fastgltf::Filter filter)
 std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath)
 {
 #ifdef DEBUG
-    fmt::print("[ {} ]\tLoading glFT: {}\n", INFO_FMT("INFO"), filepath);
+    fmt::print("[ {} ]\tLoading glTF: {}\n", INFO_FMT("INFO"), filepath);
 #endif
 
     std::shared_ptr<loaded_gltf_t> scene = std::make_shared<loaded_gltf_t>();
@@ -311,6 +311,18 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
             else
                 new_surface.material = materials[0];
 
+            glm::vec3 min_pos = vertices[initial_vtx].position;
+            glm::vec3 max_pos = vertices[initial_vtx].position;
+            for (std::size_t i = initial_vtx; i < vertices.size(); ++i)
+            {
+                min_pos = glm::min(min_pos, vertices[i].position);
+                max_pos = glm::max(max_pos, vertices[i].position);
+            }
+
+            new_surface.bounds.origin = (max_pos + min_pos) / 2.f;
+            new_surface.bounds.extents = (max_pos - min_pos) / 2.f;
+            new_surface.bounds.sphere_radius = glm::length(new_surface.bounds.extents);
+
             new_mesh->surfaces.push_back(new_surface);
         }
 
@@ -373,7 +385,7 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
     }
 
 #ifdef DEBUG
-    fmt::print("[ {} ]\tFinished loading glFT: {}\n", INFO_FMT("INFO"), filepath);
+    fmt::print("[ {} ]\tFinished loading glTF: {}\n", INFO_FMT("INFO"), filepath);
 #endif
 
     return scene;
