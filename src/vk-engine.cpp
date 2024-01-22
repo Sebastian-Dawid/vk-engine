@@ -175,7 +175,7 @@ engine_t::engine_t()
     this->window.width = 1024;
     this->window.height = 1024;
     loaded_engine = this;
-    this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(30.f, -0.0f, -085.f), .pitch = 0, .yaw = 0 };
+    this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(0.f, 0.0f, 1.f), .pitch = 0, .yaw = 0 };
     glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
     glfwSetWindowUserPointer(this->window.win, &this->main_camera);
     glfwSetCursorPosCallback(this->window.win, cursor_pos_callback);
@@ -218,6 +218,8 @@ engine_t::~engine_t()
     glfwTerminate();
 }
 
+float object_scale = 1.f;
+
 bool engine_t::run()
 {
     while (!glfwWindowShouldClose(this->window.win))
@@ -242,6 +244,7 @@ bool engine_t::run()
             compute_effect_t& selected = this->background_effects[this->current_bg_effect];
             ImGui::Text("Selected effect: %s", selected.name);
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
+            ImGui::SliderFloat("Object Scale",&object_scale, 1.f, 100.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
 
@@ -301,7 +304,7 @@ void engine_t::update_scene()
     this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
     this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 1000.f);
     this->scene_data.gpu_data.proj[1][1] *= -1;
-    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view;
+    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view * glm::scale(glm::vec3(object_scale));
     this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
     this->scene_data.gpu_data.sunlight_color = glm::vec4(1.f);
     this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);

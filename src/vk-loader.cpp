@@ -68,7 +68,7 @@ std::optional<allocated_image_t> load_image(engine_t* engine, fastgltf::Asset& a
                     }, buffer.data);
             } }, image.data);
 
-    if (new_image.image == VK_NULL_HANDLE) return std::nullopt;
+    if ((VkImage)new_image.image == VK_NULL_HANDLE) return std::nullopt;
     return new_image;
 }
 
@@ -185,6 +185,9 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
         {
             images.push_back(img.value());
             file.images[image.name.c_str()] = img.value();
+            engine->main_deletion_queue.push_function([=, &image]() {
+                    engine->destroy_image(img.value());
+                });
         }
         else
         {
@@ -413,8 +416,11 @@ void loaded_gltf_t::clear_all()
 
     for (auto& [k, v] : this->images)
     {
-        if (v.image == this->creator->error_checkerboard_image.image) continue;
-        this->creator->destroy_image(v);
+        if (v.image == this->creator->error_checkerboard_image.image)
+        {
+            continue;
+        }
+        //this->creator->destroy_image(v);
     }
 
     for (auto& sampler : this->samplers)
