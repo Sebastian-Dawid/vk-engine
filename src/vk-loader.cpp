@@ -185,7 +185,7 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
         {
             images.push_back(img.value());
             file.images[image.name.c_str()] = img.value();
-            engine->main_deletion_queue.push_function([=, &image]() {
+            engine->main_deletion_queue.push_function([=]() {
                     engine->destroy_image(img.value());
                 });
         }

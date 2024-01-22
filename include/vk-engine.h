@@ -75,9 +75,25 @@ struct gltf_metallic_roughness_t
 
     descriptor_writer_t writer;
 
+    /// Builds opaque and transparent pipelines for the given shader modules.
+    ///
+    /// Returns:
+    /// `true` - success
+    /// `false` - if pipeline creation failed
     bool build_pipelines(engine_t* engine);
     void clear_resources(vk::Device device);
-
+    /// Creates a new `material_instance_t` based on the given `material_resources_t`.
+    /// Allocates and updates the descriptor set using the given `descriptor_allocator_growable_t`.
+    ///
+    /// Params:
+    /// * `device`               - `vk::Device` to use for allocation
+    /// * `pass`                 - type of the pass this material is used in
+    /// * `resources`            - resources used in the material e.g. textures, data, etc.
+    /// * `descriptor_allocator` - allocator used to allocate the descriptor set
+    ///
+    /// Returns:
+    /// * `material_instance_t` - success
+    /// * `std::nullopt` - failed to allocate descriptor set
     std::optional<material_instance_t> write_material(vk::Device device, material_pass_e pass, const material_resources_t& resources,
             descriptor_allocator_growable_t& descriptor_allocator);
 };
@@ -200,12 +216,6 @@ struct engine_t
         vk::CommandPool pool;
     } imm_submit;
 
-    struct
-    {
-        vk::Pipeline pipeline;
-        vk::PipelineLayout layout;
-    } mesh_pipeline;
-
     std::vector<std::shared_ptr<mesh_asset_t>> test_meshes;
 
     struct
@@ -235,16 +245,72 @@ struct engine_t
 
     engine_stats_t stats;
 
+    /// Initializes the vulkan context. Calls all other `init_*` functions.
+    /// Also calls `create_swapchain` to create the swapcahin.
+    ///
+    /// Returns:
+    /// * `false` - if any step of the initialization failed.
+    /// * `true` - if the vulkan context was created successfully
     bool init_vulkan();
+    /// Initializes the command pools and buffers for the frames and immediate submission.
+    ///
+    /// Returns:
+    /// * `false` - if creation of any pool or buffer failed
+    /// * `true` - if all pools and buffers were created successfully
     bool init_commands();
+    /// Initializes the semaphores and fences for the frames and immediate submissions.
+    ///
+    /// Returns:
+    /// * `false` - if creation of any semaphore or fence failed
+    /// * `true` - if all semaphores and fences were created successfully
     bool init_sync_structures();
+    /// Initializes the global descriptor allocator and the descriptor allocators for the frames.
+    /// Also initializes the descriptors for the background pipeline and scene data.
+    ///
+    /// Returns:
+    /// * `false` - if creation of any allocator or allocation of any descriptor fails
+    /// * `true` - if all allocators were created and no allocations failed
     bool init_descriptors();
+    /// Initializes background pipeline and material pipelines.
+    /// Calls other `init_*` functions
+    ///
+    /// Returns:
+    /// * `false` - if initialization of any pipeline failed
+    /// * `true` - if all pipelines were initialized successfully
     bool init_pipelines();
-    bool init_mesh_pipeline();
+    /// Initializes the background compute pipeline.
+    ///
+    /// Returns:
+    /// * `false` - if any step of the pipeline initialization failed
+    /// * `true` - if the pipeline was created successfully
     bool init_background_pipelines();
+    /// Initializes ImGui. Creates Descriptor pool for ImGui.
+    ///
+    /// Returns:
+    /// * `false` - if pool creation or ImGui font texture creation failed
+    /// * `true` - if ImGui was initialized successfully
     bool init_imgui();
-
+    /// Initializes some default textures e.g. white, grey, black and error checkerboard.
+    ///
+    /// Returns:
+    /// * `false` - if creation of any image or sampler failed
+    /// * `true` - if all textures were created successfully
     bool init_default_data();
+
+    /// Loads the glTF Model at `path` and stores it in the `loaded_scenes` with key `name`.
+    ///
+    /// Supported Formats:
+    /// * `.gltf`
+    /// * `.glb`
+    ///
+    /// Params:
+    /// * `path` - path to the glTF file
+    /// * `name` - key to store the model under
+    ///
+    /// Returns:
+    /// * `false` - if the model could not be loaded e.g. invalid path, buffer or texture could not be created
+    /// * `true` - if the model was loaded successfully
+    bool load_model(std::string path, std::string name);
 
     bool create_swapchain(std::uint32_t width, std::uint32_t height);
     bool resize_swapchain();

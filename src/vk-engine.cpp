@@ -274,7 +274,6 @@ bool engine_t::run()
             ImGui::End();
         }
 
-        //ImGui::ShowDemoWindow();
         ImGui::Render();
 
         if (!draw()) return false;
@@ -299,10 +298,13 @@ void engine_t::update_scene()
     this->main_draw_context.opaque_surfaces.clear();
     this->main_draw_context.transparent_surfaces.clear();
 
-    loaded_scenes["structure"]->draw(glm::mat4(1.f), this->main_draw_context);
+    for (auto& [k, v] : this->loaded_scenes)
+    {
+        v->draw(glm::mat4(1.f), this->main_draw_context);
+    }
 
     this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
-    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 1000.f);
+    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 10000.f);
     this->scene_data.gpu_data.proj[1][1] *= -1;
     this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view * glm::scale(glm::vec3(object_scale));
     this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
@@ -325,19 +327,21 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
 
     for (std::uint32_t i = 0; i < this->main_draw_context.opaque_surfaces.size(); ++i)
     {
-        // NOTE: Frustum culling on small scenes appears to perform worse than just rendering offscreen objects too.
+        // NOTE: Frustum culling on small scenes appears to perform worse than just rendering off screen objects too.
         // TODO: Needs further testing.
         if (is_visible(this->main_draw_context.opaque_surfaces[i], this->scene_data.gpu_data.viewproj))
             opaque_draws.push_back(i);
     }
 
-    std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
+    // BUG: This seems to break transparent objects when. Only occasionally though.
+    /* std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
             const render_object_t& a = this->main_draw_context.opaque_surfaces[i];
             const render_object_t& b = this->main_draw_context.opaque_surfaces[j];
             if (a.material == b.material) return a.index_buffer < b.index_buffer;
             return a.material < b.material;
         });
-
+    */
+    
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
     vk::RenderingAttachmentInfo depth_attachment(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
             vk::AttachmentStoreOp::eStore);
@@ -351,7 +355,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     allocated_buffer_t gpu_scene_data_buffer = ret_buf.value();
     this->get_current_frame().deletion_queue.push_function([=, this]() {
             this->destroy_buffer(gpu_scene_data_buffer);
-            });
+        });
 
     gpu_scene_data_t* scene_uniform_data = (gpu_scene_data_t*)gpu_scene_data_buffer.info.pMappedData;
     *scene_uniform_data = this->scene_data.gpu_data;
@@ -734,10 +738,6 @@ bool engine_t::init_vulkan()
     if (!this->init_imgui()) return false;
     if (!this->init_default_data()) return false;
 
-    auto structured_file = load_gltf(this, "tests/assets/structure.glb");
-    if (!structured_file.has_value()) return false;
-    this->loaded_scenes["structure"] = structured_file.value();
-
     this->initialized = true;
     return true;
 }
@@ -841,14 +841,6 @@ bool engine_t::init_descriptors()
 
     {
         descriptor_layout_builder_t builder;
-        auto ret = builder.add_binding(0, vk::DescriptorType::eCombinedImageSampler)
-            .build(this->device.dev, vk::ShaderStageFlagBits::eFragment);
-        if (!ret.has_value()) return false;
-        this->single_image_descriptor_layout = ret.value();
-    }
-
-    {
-        descriptor_layout_builder_t builder;
         auto ret = builder.add_binding(0, vk::DescriptorType::eUniformBuffer)
             .build(this->device.dev, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
         if (!ret.has_value()) return false;
@@ -875,7 +867,7 @@ bool engine_t::init_descriptors()
         };
 
         this->frames[i].frame_descriptors = descriptor_allocator_growable_t{};
-        this->frames[i].frame_descriptors.init(this->device.dev, 1000, frame_sizes);
+        if (!this->frames[i].frame_descriptors.init(this->device.dev, 1000, frame_sizes)) return false;
 
         this->main_deletion_queue.push_function([&, i]() {
                 this->frames[i].frame_descriptors.destroy_pools(this->device.dev);
@@ -885,7 +877,6 @@ bool engine_t::init_descriptors()
     this->main_deletion_queue.push_function([&]() {
             this->device.dev.destroyDescriptorSetLayout(this->scene_data.layout);
             this->device.dev.destroyDescriptorSetLayout(this->draw_descriptor.layout);
-            this->device.dev.destroyDescriptorSetLayout(this->single_image_descriptor_layout);
             this->global_descriptor_allocator.destroy_pools(this->device.dev);
             });
 
@@ -894,56 +885,8 @@ bool engine_t::init_descriptors()
 
 bool engine_t::init_pipelines()
 {
-    if (!this->init_mesh_pipeline()) return false;
     if (!this->init_background_pipelines()) return false;
     return this->metal_rough_material.build_pipelines(this);
-}
-
-bool engine_t::init_mesh_pipeline()
-{
-    auto triangle_frag_shader = vkutil::load_shader_module("tests/build/shaders/tex_image.frag.spv", this->device.dev);
-    if (!triangle_frag_shader.has_value()) return false;
-    auto triangle_vert_shader = vkutil::load_shader_module("tests/build/shaders/colored_triangle_mesh.vert.spv", this->device.dev);
-    if (!triangle_vert_shader.has_value()) return false;
-
-    vk::PushConstantRange buffer_range(vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t));
-    vk::PipelineLayoutCreateInfo pipeline_layout_info;
-    pipeline_layout_info.setPushConstantRanges(buffer_range);
-    pipeline_layout_info.setSetLayouts(this->single_image_descriptor_layout);
-    vk::Result result;
-    std::tie(result, this->mesh_pipeline.layout) = this->device.dev.createPipelineLayout(pipeline_layout_info);
-    if (result != vk::Result::eSuccess)
-    {
-        fmt::print(stderr, "[ {} ]\tFailed to create pipeline layout!\n", ERROR_FMT("ERROR"));
-        return false;
-    }
-
-    pipeline_builder_t pipeline_builder;
-    pipeline_builder.pipeline_layout = this->mesh_pipeline.layout;
-    pipeline_builder.set_shaders(triangle_vert_shader.value(), triangle_frag_shader.value())
-        .set_input_topology(vk::PrimitiveTopology::eTriangleList)
-        .set_polygon_mode(vk::PolygonMode::eFill)
-        .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
-        .set_multisampling_none()
-        //.enable_blending_additive()
-        .disable_blending()
-        .enable_depthtest(true, vk::CompareOp::eGreaterOrEqual)
-        .set_color_attachment_format(this->draw_image.format)
-        .set_depth_format(this->depth_image.format);
-
-    auto pipeline = pipeline_builder.build(this->device.dev);
-    if (!pipeline.has_value()) return false;
-    this->mesh_pipeline.pipeline = pipeline.value();
-
-    this->device.dev.destroyShaderModule(triangle_frag_shader.value());
-    this->device.dev.destroyShaderModule(triangle_vert_shader.value());
-
-    this->main_deletion_queue.push_function([=, this](){
-            this->device.dev.destroyPipelineLayout(this->mesh_pipeline.layout);
-            this->device.dev.destroyPipeline(this->mesh_pipeline.pipeline);
-            });
-
-    return true;
 }
 
 bool engine_t::init_background_pipelines()
@@ -1055,10 +998,6 @@ bool engine_t::init_imgui()
 
 bool engine_t::init_default_data()
 {
-    /*auto ret_mesh = load_gltf(this, "tests/assets/basicmesh.glb");
-    if (!ret_mesh.has_value()) return false;
-    this->test_meshes = ret_mesh.value();*/
-
     std::uint32_t white = 0xFFFFFFFF;
     auto wi = this->create_image((void*)&white, vk::Extent3D(1, 1, 1), vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eSampled);
     if (!wi.has_value()) return false;
@@ -1132,25 +1071,18 @@ bool engine_t::init_default_data()
     material_resources.data_buffer = material_constants.value().buffer;
     material_resources.data_buffer_offset = 0;
 
-    auto ret = metal_rough_material.write_material(this->device.dev, material_pass_e::MAIN_COLOR, material_resources, this->global_descriptor_allocator);
+    auto ret = this->metal_rough_material.write_material(this->device.dev, material_pass_e::MAIN_COLOR, material_resources, this->global_descriptor_allocator);
     if (!ret.has_value()) return false;
     this->default_data = ret.value();
 
-    /*for (auto& m : test_meshes)
-    {
-        std::shared_ptr<mesh_node_t> new_node = std::make_shared<mesh_node_t>();
-        new_node->mesh = m;
-        new_node->local_transform = glm::mat4(1.f);
-        new_node->world_transform = glm::mat4(1.f);
+    return true;
+}
 
-        for (auto& s : new_node->mesh->surfaces)
-        {
-            s.material = std::make_shared<gltf_material_t>(this->default_data);
-        }
-
-        this->loaded_nodes[m->name] = std::move(new_node);
-    }*/
-
+bool engine_t::load_model(std::string path, std::string name)
+{
+    auto structured_file = load_gltf(this, path);
+    if (!structured_file.has_value()) return false;
+    this->loaded_scenes[name] = structured_file.value();
     return true;
 }
 
