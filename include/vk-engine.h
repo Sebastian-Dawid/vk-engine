@@ -251,7 +251,7 @@ struct engine_t
     /// Returns:
     /// * `false` - if any step of the initialization failed.
     /// * `true` - if the vulkan context was created successfully
-    bool init_vulkan();
+    bool init_vulkan(std::string app_name = "vk-app");
     /// Initializes the command pools and buffers for the frames and immediate submission.
     ///
     /// Returns:
@@ -339,6 +339,6 @@ struct engine_t
 
     static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
-    engine_t();
+    engine_t(std::uint32_t width = 1024, std::uint32_t height = 1024, std::string app_name = "vk-app");
     ~engine_t();
 };

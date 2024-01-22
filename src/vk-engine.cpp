@@ -163,17 +163,17 @@ void engine_t::framebuffer_size_callback(GLFWwindow *window, int width, int heig
     loaded_engine->resize_swapchain();
 }
 
-engine_t::engine_t()
+engine_t::engine_t(std::uint32_t width, std::uint32_t height, std::string app_name)
 {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    if ((this->window.win = glfwCreateWindow(1024, 1024, "test", NULL, NULL)) == nullptr)
+    if ((this->window.win = glfwCreateWindow(width, height, app_name.c_str(), NULL, NULL)) == nullptr)
     {
         fmt::print(stderr, "[ {} ]\tFailed to create GLFW window!\n", ERROR_FMT("ERROR"));
         return;
     }
-    this->window.width = 1024;
-    this->window.height = 1024;
+    this->window.width = width;
+    this->window.height = height;
     loaded_engine = this;
     this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(0.f, 0.0f, 1.f), .pitch = 0, .yaw = 0 };
     glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
@@ -244,9 +244,14 @@ bool engine_t::run()
             compute_effect_t& selected = this->background_effects[this->current_bg_effect];
             ImGui::Text("Selected effect: %s", selected.name);
             ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
-            ImGui::SliderFloat("Object Scale",&object_scale, 1.f, 100.f);
+            ImGui::SliderFloat("Object Scale",&object_scale, .1f, 10.f);
             ImGui::InputFloat4("data1", (float*) &selected.data.data1);
             ImGui::InputFloat4("data2", (float*) &selected.data.data2);
+
+            ImGui::Text("Light:");
+            ImGui::ColorEdit4("ambient color", (float*) &this->scene_data.gpu_data.ambient_color);
+            ImGui::ColorEdit4("light color", (float*) &this->scene_data.gpu_data.sunlight_color);
+            ImGui::InputFloat4("light dir", (float*) &this->scene_data.gpu_data.sunlight_dir);
 
             ImGui::Text("Info:");
             ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
@@ -307,9 +312,6 @@ void engine_t::update_scene()
     this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 10000.f);
     this->scene_data.gpu_data.proj[1][1] *= -1;
     this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view * glm::scale(glm::vec3(object_scale));
-    this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
-    this->scene_data.gpu_data.sunlight_color = glm::vec4(1.f);
-    this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
 
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -547,7 +549,7 @@ bool engine_t::draw()
     return true;
 }
 
-bool engine_t::init_vulkan()
+bool engine_t::init_vulkan(std::string app_name)
 {
     if (this->window.win == nullptr) return false;
 #ifdef DEBUG
@@ -581,7 +583,7 @@ bool engine_t::init_vulkan()
 
     vkb::InstanceBuilder builder;
     vkb::Result<vkb::Instance> inst_ret = builder
-        .set_app_name("test")
+        .set_app_name(app_name.c_str())
 #ifdef DEBUG
         .set_debug_messenger_severity(VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
 #ifdef INFO_LAYERS
@@ -737,6 +739,10 @@ bool engine_t::init_vulkan()
     if (!this->init_pipelines()) return false;
     if (!this->init_imgui()) return false;
     if (!this->init_default_data()) return false;
+    
+    this->scene_data.gpu_data.ambient_color = glm::vec4(.01f);
+    this->scene_data.gpu_data.sunlight_color = glm::vec4(.01f);
+    this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
 
     this->initialized = true;
     return true;
