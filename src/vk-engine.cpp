@@ -60,11 +60,11 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
     node_t::draw(top_matrix, ctx);
 }
 
-bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine)
+bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string vertex, std::string fragment)
 {
-    auto vert_shader = vkutil::load_shader_module("tests/build/shaders/mesh.vert.spv", engine->device.dev);
+    auto vert_shader = vkutil::load_shader_module(vertex.c_str(), engine->device.dev);
     if (!vert_shader.has_value()) return false;
-    auto frag_shader = vkutil::load_shader_module("tests/build/shaders/mesh.frag.spv", engine->device.dev);
+    auto frag_shader = vkutil::load_shader_module(fragment.c_str(), engine->device.dev);
     if (!frag_shader.has_value()) return false;
 
     vk::PushConstantRange matrix_range(vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t));
@@ -741,7 +741,7 @@ bool engine_t::init_vulkan(std::string app_name)
     if (!this->init_default_data()) return false;
     
     this->scene_data.gpu_data.ambient_color = glm::vec4(.01f);
-    this->scene_data.gpu_data.sunlight_color = glm::vec4(.01f);
+    this->scene_data.gpu_data.sunlight_color = glm::vec4(glm::vec3(.01f), 1.f);
     this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
 
     this->initialized = true;
@@ -892,7 +892,7 @@ bool engine_t::init_descriptors()
 bool engine_t::init_pipelines()
 {
     if (!this->init_background_pipelines()) return false;
-    return this->metal_rough_material.build_pipelines(this);
+    return true;//this->metal_rough_material.build_pipelines(this);
 }
 
 bool engine_t::init_background_pipelines()
@@ -1054,32 +1054,6 @@ bool engine_t::init_default_data()
             this->device.dev.destroySampler(this->default_sampler_nearest);
             this->device.dev.destroySampler(this->default_sampler_linear);
             });
-
-    gltf_metallic_roughness_t::material_resources_t material_resources{
-        .color_image = this->white_image,
-        .color_sampler = this->default_sampler_linear,
-        .metal_rough_image = this->white_image,
-        .metal_rough_sampler = this->default_sampler_linear
-    };
-
-    auto material_constants = this->create_buffer(sizeof(gltf_metallic_roughness_t::material_constants_t),
-            vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-    if (!material_constants.has_value()) return false;
-
-    gltf_metallic_roughness_t::material_constants_t* scene_uniform_data = (gltf_metallic_roughness_t::material_constants_t*)material_constants.value().info.pMappedData;
-    scene_uniform_data->color_factors = glm::vec4(1, 1, 1, 1);
-    scene_uniform_data->metal_rought_factors = glm::vec4(1, 0.5, 0, 0);
-
-    this->main_deletion_queue.push_function([=, this]() {
-            this->destroy_buffer(material_constants.value());
-            });
-
-    material_resources.data_buffer = material_constants.value().buffer;
-    material_resources.data_buffer_offset = 0;
-
-    auto ret = this->metal_rough_material.write_material(this->device.dev, material_pass_e::MAIN_COLOR, material_resources, this->global_descriptor_allocator);
-    if (!ret.has_value()) return false;
-    this->default_data = ret.value();
 
     return true;
 }

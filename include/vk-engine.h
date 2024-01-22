@@ -80,7 +80,7 @@ struct gltf_metallic_roughness_t
     /// Returns:
     /// `true` - success
     /// `false` - if pipeline creation failed
-    bool build_pipelines(engine_t* engine);
+    bool build_pipelines(engine_t* engine, std::string vertex, std::string fragment);
     void clear_resources(vk::Device device);
     /// Creates a new `material_instance_t` based on the given `material_resources_t`.
     /// Allocates and updates the descriptor set using the given `descriptor_allocator_growable_t`.
@@ -235,9 +235,6 @@ struct engine_t
     std::vector<compute_effect_t> background_effects;
     std::uint32_t current_bg_effect = 0;
 
-    vk::DescriptorSetLayout single_image_descriptor_layout;
-
-    material_instance_t default_data;
     gltf_metallic_roughness_t metal_rough_material;
 
     draw_context_t main_draw_context;
