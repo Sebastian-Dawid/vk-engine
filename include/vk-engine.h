@@ -162,6 +162,7 @@ struct engine_t
         bool resize_requested;
     } window;
  
+    // TODO: This probably should not be part of the engine itself, but the consumers responsibility
     camera_t main_camera;
 
     vk::PhysicalDevice physical_device;
@@ -186,6 +187,7 @@ struct engine_t
         std::vector<vk::ImageView> views;
     } swapchain;
 
+    // TODO: Images should not be hard coded for general usage e.g. deferred rendering where more than one image is required before copying to the swapchain
     allocated_image_t draw_image;
     allocated_image_t depth_image;
     vk::Extent2D draw_extent;
@@ -197,12 +199,14 @@ struct engine_t
     deletion_queue_t main_deletion_queue;
 
     descriptor_allocator_growable_t global_descriptor_allocator;
+    // TODO: Same issue as the images.
     struct
     {
         vk::DescriptorSet set;
         vk::DescriptorSetLayout layout;
     } draw_descriptor;
 
+    // TODO: This should not be an instance variable but a local when creating the background pipelines.
     struct
     {
         vk::Pipeline pipeline;
@@ -216,8 +220,7 @@ struct engine_t
         vk::CommandPool pool;
     } imm_submit;
 
-    std::vector<std::shared_ptr<mesh_asset_t>> test_meshes;
-
+    // TODO: Needs to be more generalized. Also: Should this be part of the engine itself?
     struct
     {
         gpu_scene_data_t gpu_data;
@@ -232,9 +235,11 @@ struct engine_t
     vk::Sampler default_sampler_linear;
     vk::Sampler default_sampler_nearest;
 
+    // TODO: This is too specific. Needs generalization.
     std::vector<compute_effect_t> background_effects;
     std::uint32_t current_bg_effect = 0;
 
+    // TODO: Is this general enough?
     gltf_metallic_roughness_t metal_rough_material;
 
     draw_context_t main_draw_context;

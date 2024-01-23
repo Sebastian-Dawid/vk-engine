@@ -239,6 +239,9 @@ bool engine_t::run()
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // TODO: Extract all but the stats window into a function that is passed into the engine to allow 
+        //       the engines consumer to define custom windows.
         if (ImGui::Begin("background"))
         {
             compute_effect_t& selected = this->background_effects[this->current_bg_effect];
@@ -269,6 +272,7 @@ bool engine_t::run()
             ImGui::End();
         }
 
+        // TODO: Add engine flag to display this.
         if (ImGui::Begin("Stats"))
         {
             ImGui::Text("Frametime:   %f ms", this->stats.fram_time);
