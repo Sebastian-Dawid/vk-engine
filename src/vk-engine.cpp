@@ -60,24 +60,26 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
     node_t::draw(top_matrix, ctx);
 }
 
-bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string vertex, std::string fragment)
+bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string vertex, std::string fragment,
+        std::size_t push_constants_size, std::vector<std::tuple<std::uint32_t, vk::DescriptorType>> bindings,
+        std::vector<vk::DescriptorSetLayout> external_layouts)
 {
     auto vert_shader = vkutil::load_shader_module(vertex.c_str(), engine->device.dev);
     if (!vert_shader.has_value()) return false;
     auto frag_shader = vkutil::load_shader_module(fragment.c_str(), engine->device.dev);
     if (!frag_shader.has_value()) return false;
 
-    vk::PushConstantRange matrix_range(vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t));
+    vk::PushConstantRange matrix_range(vk::ShaderStageFlagBits::eVertex, 0, push_constants_size);
     descriptor_layout_builder_t layout_builder;
-    auto ret_layout = layout_builder.add_binding(0, vk::DescriptorType::eUniformBuffer)
-        .add_binding(1, vk::DescriptorType::eCombinedImageSampler)
-        .add_binding(2, vk::DescriptorType::eCombinedImageSampler)
+    for (const auto& [bind, type] : bindings) layout_builder.add_binding(bind, type);
+    // TODO: Should the stages also be an input?
+    auto ret_layout = layout_builder
         .build(engine->device.dev, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
     if (!ret_layout.has_value()) return false;
     this->material_layout = ret_layout.value();
 
-    vk::DescriptorSetLayout layouts[] = { engine->scene_data.layout, this->material_layout };
-    vk::PipelineLayoutCreateInfo mesh_layout_info({}, layouts, matrix_range);
+    external_layouts.push_back(this->material_layout);
+    vk::PipelineLayoutCreateInfo mesh_layout_info({}, external_layouts, matrix_range);
 
     auto [result, new_layout] = engine->device.dev.createPipelineLayout(mesh_layout_info);
     if (result != vk::Result::eSuccess)
@@ -91,6 +93,7 @@ bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string ve
 
     pipeline_builder_t pipeline_builder;
     pipeline_builder.pipeline_layout = new_layout;
+    // TODO: Pipeline settings should probably be an input too
     auto ret_pipeline = pipeline_builder.set_shaders(vert_shader.value(), frag_shader.value())
         .set_input_topology(vk::PrimitiveTopology::eTriangleList)
         .set_polygon_mode(vk::PolygonMode::eFill)
@@ -133,6 +136,7 @@ std::optional<material_instance_t> gltf_metallic_roughness_t::write_material(vk:
     material.material_set = ret.value();
 
     this->writer.clear();
+    // TODO: Binding should not be hard coded.
     this->writer.write_buffer(0, resources.data_buffer, sizeof(material_constants_t), resources.data_buffer_offset, vk::DescriptorType::eUniformBuffer);
     this->writer.write_image(1, resources.color_image.view, resources.color_sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
     this->writer.write_image(2, resources.metal_rough_image.view, resources.metal_rough_sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
@@ -163,7 +167,7 @@ void engine_t::framebuffer_size_callback(GLFWwindow *window, int width, int heig
     loaded_engine->resize_swapchain();
 }
 
-engine_t::engine_t(std::uint32_t width, std::uint32_t height, std::string app_name)
+engine_t::engine_t(std::uint32_t width, std::uint32_t height, std::string app_name, bool show_stats, bool use_imgui) : use_imgui(use_imgui)
 {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -179,6 +183,7 @@ engine_t::engine_t(std::uint32_t width, std::uint32_t height, std::string app_na
     glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
     glfwSetWindowUserPointer(this->window.win, &this->main_camera);
     glfwSetCursorPosCallback(this->window.win, cursor_pos_callback);
+    this->show_stats = show_stats;
 }
 
 engine_t::~engine_t()
@@ -236,54 +241,59 @@ bool engine_t::run()
             if (!this->resize_swapchain()) return false;
         }
 
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        // TODO: Extract all but the stats window into a function that is passed into the engine to allow 
-        //       the engines consumer to define custom windows.
-        if (ImGui::Begin("background"))
+        if (this->use_imgui)
         {
-            compute_effect_t& selected = this->background_effects[this->current_bg_effect];
-            ImGui::Text("Selected effect: %s", selected.name);
-            ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
-            ImGui::SliderFloat("Object Scale",&object_scale, .1f, 10.f);
-            ImGui::InputFloat4("data1", (float*) &selected.data.data1);
-            ImGui::InputFloat4("data2", (float*) &selected.data.data2);
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
 
-            ImGui::Text("Light:");
-            ImGui::ColorEdit4("ambient color", (float*) &this->scene_data.gpu_data.ambient_color);
-            ImGui::ColorEdit4("light color", (float*) &this->scene_data.gpu_data.sunlight_color);
-            ImGui::InputFloat4("light dir", (float*) &this->scene_data.gpu_data.sunlight_dir);
+            // TODO: Extract all but the stats window into a function that is passed into the engine to allow 
+            //       the engines consumer to define custom windows.
+            if (ImGui::Begin("background"))
+            {
+                compute_effect_t& selected = this->background_effects[this->current_bg_effect];
+                ImGui::Text("Selected effect: %s", selected.name);
+                ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
+                ImGui::SliderFloat("Object Scale",&object_scale, .1f, 10.f);
+                ImGui::InputFloat4("data1", (float*) &selected.data.data1);
+                ImGui::InputFloat4("data2", (float*) &selected.data.data2);
 
-            ImGui::Text("Info:");
-            ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
-            ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
-            ImGui::Text("Window Resolution: (%d, %d)", this->swapchain.extent.width, this->swapchain.extent.height);
-            ImGui::Text("Buffer Resolution: (%d, %d)", this->draw_image.extent.width, this->draw_image.extent.height);
+                ImGui::Text("Light:");
+                ImGui::ColorEdit4("ambient color", (float*) &this->scene_data.gpu_data.ambient_color);
+                ImGui::ColorEdit4("light color", (float*) &this->scene_data.gpu_data.sunlight_color);
+                ImGui::InputFloat4("light dir", (float*) &this->scene_data.gpu_data.sunlight_dir);
 
-            ImGui::Text("Misc:");
-            ImGui::SliderFloat("Cam Speed",&this->main_camera.speed, 1.f, 10.f);
-            /*
-            ImGui::InputFloat4("data3", (float*) &selected.data.data3);
-            ImGui::InputFloat4("data4", (float*) &selected.data.data4);
-            */
+                ImGui::Text("Info:");
+                ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
+                ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
+                ImGui::Text("Window Resolution: (%d, %d)", this->swapchain.extent.width, this->swapchain.extent.height);
+                ImGui::Text("Buffer Resolution: (%d, %d)", this->draw_image.extent.width, this->draw_image.extent.height);
 
-            ImGui::End();
+                ImGui::Text("Misc:");
+                ImGui::SliderFloat("Cam Speed",&this->main_camera.speed, 1.f, 10.f);
+                /*
+                   ImGui::InputFloat4("data3", (float*) &selected.data.data3);
+                   ImGui::InputFloat4("data4", (float*) &selected.data.data4);
+                   */
+
+                ImGui::End();
+            }
+
+            if (this->show_stats)
+            {
+                if (ImGui::Begin("Stats"))
+                {
+                    ImGui::Text("Frametime:   %f ms", this->stats.fram_time);
+                    ImGui::Text("Draw time:   %f ms", this->stats.mesh_draw_time);
+                    ImGui::Text("Update time: %f ms", this->stats.scene_update_time);
+                    ImGui::Text("Triangles:   %i", this->stats.triangle_count);
+                    ImGui::Text("Draws:       %i", this->stats.drawcall_count);
+                    ImGui::End();
+                }
+            }
+
+            ImGui::Render();
         }
-
-        // TODO: Add engine flag to display this.
-        if (ImGui::Begin("Stats"))
-        {
-            ImGui::Text("Frametime:   %f ms", this->stats.fram_time);
-            ImGui::Text("Draw time:   %f ms", this->stats.mesh_draw_time);
-            ImGui::Text("Update time: %f ms", this->stats.scene_update_time);
-            ImGui::Text("Triangles:   %i", this->stats.triangle_count);
-            ImGui::Text("Draws:       %i", this->stats.drawcall_count);
-            ImGui::End();
-        }
-
-        ImGui::Render();
 
         if (!draw()) return false;
 
@@ -516,7 +526,7 @@ bool engine_t::draw()
 
     vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eColorAttachmentOptimal);
     
-    this->draw_imgui(cmd, this->swapchain.views[swapchain_img_idx]);
+    if (this->use_imgui) this->draw_imgui(cmd, this->swapchain.views[swapchain_img_idx]);
     
     vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
 
@@ -741,7 +751,10 @@ bool engine_t::init_vulkan(std::string app_name)
     if (!this->init_sync_structures()) return false;
     if (!this->init_descriptors()) return false;
     if (!this->init_pipelines()) return false;
-    if (!this->init_imgui()) return false;
+    if (this->use_imgui)
+    {
+        if (!this->init_imgui()) return false;
+    }
     if (!this->init_default_data()) return false;
     
     this->scene_data.gpu_data.ambient_color = glm::vec4(.01f);

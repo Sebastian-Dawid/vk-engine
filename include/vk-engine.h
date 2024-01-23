@@ -80,7 +80,9 @@ struct gltf_metallic_roughness_t
     /// Returns:
     /// `true` - success
     /// `false` - if pipeline creation failed
-    bool build_pipelines(engine_t* engine, std::string vertex, std::string fragment);
+    bool build_pipelines(engine_t* engine, std::string vertex, std::string fragment,
+            std::size_t push_constants_size, std::vector<std::tuple<std::uint32_t, vk::DescriptorType>> bindings,
+            std::vector<vk::DescriptorSetLayout> external_layouts);
     void clear_resources(vk::Device device);
     /// Creates a new `material_instance_t` based on the given `material_resources_t`.
     /// Allocates and updates the descriptor set using the given `descriptor_allocator_growable_t`.
@@ -245,6 +247,8 @@ struct engine_t
     draw_context_t main_draw_context;
     std::unordered_map<std::string, std::shared_ptr<loaded_gltf_t>> loaded_scenes;
 
+    const bool use_imgui = false;
+    bool show_stats = false;
     engine_stats_t stats;
 
     /// Initializes the vulkan context. Calls all other `init_*` functions.
@@ -341,6 +345,6 @@ struct engine_t
 
     static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
-    engine_t(std::uint32_t width = 1024, std::uint32_t height = 1024, std::string app_name = "vk-app");
+    engine_t(std::uint32_t width = 1024, std::uint32_t height = 1024, std::string app_name = "vk-app", bool show_stats = false, bool use_imgui = false);
     ~engine_t();
 };

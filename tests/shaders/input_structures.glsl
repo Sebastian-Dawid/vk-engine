@@ -15,4 +15,4 @@ layout (set = 1, binding = 0) uniform gltf_material_data_t
 } material_data;
 
 layout (set = 1, binding = 1) uniform sampler2D color_tex;
-layout (set = 1, binding = 2) uniform sampler2D meatl_rough_tex;
+layout (set = 1, binding = 2) uniform sampler2D metal_rough_tex;
