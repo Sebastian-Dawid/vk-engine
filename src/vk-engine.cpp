@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <vk-engine.h>
 #include <vk-images.h>
 #include <error_fmt.h>
@@ -136,10 +137,10 @@ std::optional<material_instance_t> gltf_metallic_roughness_t::write_material(vk:
     material.material_set = ret.value();
 
     this->writer.clear();
-    // TODO: Binding should not be hard coded.
-    this->writer.write_buffer(0, resources.data_buffer, sizeof(material_constants_t), resources.data_buffer_offset, vk::DescriptorType::eUniformBuffer);
-    this->writer.write_image(1, resources.color_image.view, resources.color_sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
-    this->writer.write_image(2, resources.metal_rough_image.view, resources.metal_rough_sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
+    for (const auto& buf : resources.buffers)
+        this->writer.write_buffer(buf.binding, buf.buffer, buf.size, buf.offset, buf.type);
+    for (const auto& img : resources.images)
+        this->writer.write_image(img.binding, img.image.view, img.sampler, img.layout, img.type);
 
     this->writer.update_set(device, material.material_set);
 
@@ -223,8 +224,6 @@ engine_t::~engine_t()
     glfwTerminate();
 }
 
-float object_scale = 1.f;
-
 bool engine_t::run()
 {
     while (!glfwWindowShouldClose(this->window.win))
@@ -247,37 +246,8 @@ bool engine_t::run()
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            // TODO: Extract all but the stats window into a function that is passed into the engine to allow 
-            //       the engines consumer to define custom windows.
-            if (ImGui::Begin("background"))
-            {
-                compute_effect_t& selected = this->background_effects[this->current_bg_effect];
-                ImGui::Text("Selected effect: %s", selected.name);
-                ImGui::SliderInt("Effect Index", (int*) &this->current_bg_effect, 0, this->background_effects.size() - 1);
-                ImGui::SliderFloat("Object Scale",&object_scale, .1f, 10.f);
-                ImGui::InputFloat4("data1", (float*) &selected.data.data1);
-                ImGui::InputFloat4("data2", (float*) &selected.data.data2);
-
-                ImGui::Text("Light:");
-                ImGui::ColorEdit4("ambient color", (float*) &this->scene_data.gpu_data.ambient_color);
-                ImGui::ColorEdit4("light color", (float*) &this->scene_data.gpu_data.sunlight_color);
-                ImGui::InputFloat4("light dir", (float*) &this->scene_data.gpu_data.sunlight_dir);
-
-                ImGui::Text("Info:");
-                ImGui::SliderFloat("Render Scale",&this->render_scale, 0.01f, 1.f);
-                ImGui::Text("Render Resolution: (%d, %d)", this->draw_extent.width, this->draw_extent.height);
-                ImGui::Text("Window Resolution: (%d, %d)", this->swapchain.extent.width, this->swapchain.extent.height);
-                ImGui::Text("Buffer Resolution: (%d, %d)", this->draw_image.extent.width, this->draw_image.extent.height);
-
-                ImGui::Text("Misc:");
-                ImGui::SliderFloat("Cam Speed",&this->main_camera.speed, 1.f, 10.f);
-                /*
-                   ImGui::InputFloat4("data3", (float*) &selected.data.data3);
-                   ImGui::InputFloat4("data4", (float*) &selected.data.data4);
-                   */
-
-                ImGui::End();
-            }
+            // NOTE: Setting this function is the responsibility of the consumer of the engine.
+            this->define_imgui_windows();
 
             if (this->show_stats)
             {
@@ -319,13 +289,13 @@ void engine_t::update_scene()
 
     for (auto& [k, v] : this->loaded_scenes)
     {
-        v->draw(glm::mat4(1.f), this->main_draw_context);
+        v->draw(v->transform, this->main_draw_context);
     }
 
     this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
     this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 10000.f);
     this->scene_data.gpu_data.proj[1][1] *= -1;
-    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view * glm::scale(glm::vec3(object_scale));
+    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view ;
 
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -417,7 +387,8 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
             cmd.bindIndexBuffer(obj.index_buffer, 0, vk::IndexType::eUint32);
         }
 
-        gpu_draw_push_constants_t push_constants{ .world = obj.transform, .vertex_buffer = obj.vertex_buffer_address };
+        gpu_draw_push_constants_t push_constants{ .world = obj.transform,
+            .vertex_buffer = obj.vertex_buffer_address };
         cmd.pushConstants(obj.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
         cmd.drawIndexed(obj.index_count, 1, obj.first_index, 0, 0);
 
@@ -757,8 +728,8 @@ bool engine_t::init_vulkan(std::string app_name)
     }
     if (!this->init_default_data()) return false;
     
-    this->scene_data.gpu_data.ambient_color = glm::vec4(.01f);
-    this->scene_data.gpu_data.sunlight_color = glm::vec4(glm::vec3(.01f), 1.f);
+    this->scene_data.gpu_data.ambient_color = glm::vec4(.1f);
+    this->scene_data.gpu_data.sunlight_color = glm::vec4(glm::vec3(.5f), 1.f);
     this->scene_data.gpu_data.sunlight_dir = glm::vec4(0, 1, 0.5, 1.f);
 
     this->initialized = true;
@@ -924,9 +895,9 @@ bool engine_t::init_background_pipelines()
         return false;
     }
 
-    auto gradient_shader = vkutil::load_shader_module("tests/build/shaders/gradient_color.comp.spv", this->device.dev);
+    auto gradient_shader = vkutil::load_shader_module("/home/sdawid/C(++)-Programms/vk-engine/tests/build/shaders/gradient_color.comp.spv", this->device.dev);
     if (!gradient_shader.has_value()) return false;
-    auto sky_shader = vkutil::load_shader_module("tests/build/shaders/sky.comp.spv", this->device.dev);
+    auto sky_shader = vkutil::load_shader_module("/home/sdawid/C(++)-Programms/vk-engine/tests/build/shaders/sky.comp.spv", this->device.dev);
     if (!sky_shader.has_value()) return false;
 
     compute_effect_t gradient{ .name = "gradient", .layout = this->gradient_pipeline.layout };

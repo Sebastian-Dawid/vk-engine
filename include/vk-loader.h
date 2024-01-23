@@ -49,6 +49,8 @@ struct loaded_gltf_t : public renderable_i
     allocated_buffer_t material_data_buffer;
     engine_t* creator;
 
+    glm::mat4 transform = glm::mat4(1.f);
+
     virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) override;
 
     void clear_all();

@@ -56,6 +56,7 @@ struct gltf_metallic_roughness_t
 
     vk::DescriptorSetLayout material_layout;
 
+    // size: 256 bytes
     struct material_constants_t
     {
         glm::vec4 color_factors;
@@ -65,12 +66,24 @@ struct gltf_metallic_roughness_t
 
     struct material_resources_t
     {
-        allocated_image_t color_image;
-        vk::Sampler color_sampler;
-        allocated_image_t metal_rough_image;
-        vk::Sampler metal_rough_sampler;
-        vk::Buffer data_buffer;
-        std::uint32_t data_buffer_offset;
+        struct img_t
+        {
+            std::size_t binding;
+            allocated_image_t image;
+            vk::Sampler sampler;
+            vk::ImageLayout layout;
+            vk::DescriptorType type;
+        };
+        struct buf_t
+        {
+            std::size_t binding;
+            vk::Buffer buffer;
+            std::uint32_t offset;
+            std::size_t size;
+            vk::DescriptorType type;
+        };
+        std::vector<img_t> images;
+        std::vector<buf_t> buffers;
     };
 
     descriptor_writer_t writer;
@@ -247,6 +260,7 @@ struct engine_t
     draw_context_t main_draw_context;
     std::unordered_map<std::string, std::shared_ptr<loaded_gltf_t>> loaded_scenes;
 
+    std::function<void()> define_imgui_windows = [](){};
     const bool use_imgui = false;
     bool show_stats = false;
     engine_stats_t stats;

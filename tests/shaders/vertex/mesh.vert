@@ -34,7 +34,7 @@ void main()
     vec4 position = vec4(v.position, 1.f);
     gl_Position = scene_data.viewproj * push_constants.render_matrix * position;
 
-    out_normal = (push_constants.render_matrix * vec4(v.normal, 0.f)).xyz;
+    out_normal = normalize((push_constants.render_matrix * vec4(v.normal, 0.f)).xyz);
     out_color = v.color.xyz * material_data.color_factors.xyz;
     out_uv = v.uv;
 }

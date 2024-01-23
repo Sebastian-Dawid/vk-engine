@@ -219,12 +219,24 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
 
         material_pass_e pass_type = (mat.alphaMode == fastgltf::AlphaMode::Blend) ? pass_type = material_pass_e::TRANSPARENT : material_pass_e::MAIN_COLOR;
         
-        gltf_metallic_roughness_t::material_resources_t material_resources{ .color_image = engine->white_image,
-            .color_sampler = engine->default_sampler_linear,
-            .metal_rough_image = engine->white_image,
-            .metal_rough_sampler = engine->default_sampler_linear,
-            .data_buffer = file.material_data_buffer.buffer,
-            .data_buffer_offset = static_cast<uint32_t>(data_index * sizeof(gltf_metallic_roughness_t::material_constants_t))
+        // TODO: These binding should probably not be static
+        gltf_metallic_roughness_t::material_resources_t::buf_t buffer{ .binding = 0,
+            .buffer = file.material_data_buffer.buffer,
+            .offset = static_cast<std::uint32_t>(data_index * sizeof(gltf_metallic_roughness_t::material_constants_t)),
+            .size = sizeof(gltf_metallic_roughness_t::material_constants_t),
+            .type = vk::DescriptorType::eUniformBuffer
+        };
+        gltf_metallic_roughness_t::material_resources_t::img_t color_image{ .binding = 1,
+            .image = engine->white_image,
+            .sampler = engine->default_sampler_linear,
+            .layout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            .type = vk::DescriptorType::eCombinedImageSampler
+        };
+        gltf_metallic_roughness_t::material_resources_t::img_t metal_rough_image = color_image;
+        metal_rough_image.binding = 2;
+
+        gltf_metallic_roughness_t::material_resources_t material_resources{ .images = { color_image, metal_rough_image },
+            .buffers = { buffer }
         };
 
         if (mat.pbrData.baseColorTexture.has_value())
@@ -232,8 +244,8 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
             std::size_t img = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].imageIndex.value();
             std::size_t sampler = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].samplerIndex.value();
 
-            material_resources.color_image = images[img];
-            material_resources.color_sampler = file.samplers[sampler];
+            material_resources.images[0].image = images[img];
+            material_resources.images[0].sampler = file.samplers[sampler];
         }
 
         auto ret = engine->metal_rough_material.write_material(engine->device.dev, pass_type, material_resources, file.descriptor_pool);

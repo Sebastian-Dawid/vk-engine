@@ -56,6 +56,6 @@ workspace "template"
 
         filter {}
 
-        includedirs { "include" }
+        includedirs { "include", "imgui" }
         files { "tests/setup.cpp", "tests/shaders/**" }
         links { "fmt", "glfw", "vulkan", "vk-engine", "imgui", "fastgltf" }

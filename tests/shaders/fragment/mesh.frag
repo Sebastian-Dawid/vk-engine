@@ -14,6 +14,5 @@ void main()
     float light_value = max(dot(in_normal, scene_data.sunlight_dir.xyz), 0.1f);
 
     vec3 color = in_color * texture(color_tex, in_uv).xyz;
-    vec3 ambient = color * scene_data.ambient_color.xyz;
-    out_color = vec4(color * light_value * scene_data.sunlight_color.w + ambient, 1.f);
+    out_color = vec4((light_value * scene_data.sunlight_color.xyz + scene_data.ambient_color.xyz) * color, 1.f);
 }
