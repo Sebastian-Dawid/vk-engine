@@ -10,6 +10,10 @@
 #include <glm/gtx/transform.hpp>
 #include <chrono>
 
+#ifndef BASE_DIR
+#define BASE_DIR ""
+#endif
+
 bool is_visible(const render_object_t& obj, const glm::mat4& viewproj)
 {
     std::array<glm::vec3, 8> corners {
@@ -895,9 +899,10 @@ bool engine_t::init_background_pipelines()
         return false;
     }
 
-    auto gradient_shader = vkutil::load_shader_module("/home/sdawid/C(++)-Programms/vk-engine/tests/build/shaders/gradient_color.comp.spv", this->device.dev);
+    std::string base_dir = BASE_DIR;
+    auto gradient_shader = vkutil::load_shader_module((base_dir + "/tests/build/shaders/gradient_color.comp.spv").c_str(), this->device.dev);
     if (!gradient_shader.has_value()) return false;
-    auto sky_shader = vkutil::load_shader_module("/home/sdawid/C(++)-Programms/vk-engine/tests/build/shaders/sky.comp.spv", this->device.dev);
+    auto sky_shader = vkutil::load_shader_module((base_dir + "/tests/build/shaders/sky.comp.spv").c_str(), this->device.dev);
     if (!sky_shader.has_value()) return false;
 
     compute_effect_t gradient{ .name = "gradient", .layout = this->gradient_pipeline.layout };

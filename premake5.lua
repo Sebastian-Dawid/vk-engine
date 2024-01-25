@@ -1,3 +1,5 @@
+cwd = os.getcwd()
+
 workspace "template"
     toolset "clang"
     cppdialect "c++20"
@@ -33,6 +35,7 @@ workspace "template"
         language "C++"
         targetdir "build/lib/%{cfg.buildcfg}"
         buildoptions { "-Wall" }
+        defines { "BASE_DIR=\"" .. cwd .. "\"" }
         filter "configurations:Release"
             buildoptions { "-Werror" }
 
