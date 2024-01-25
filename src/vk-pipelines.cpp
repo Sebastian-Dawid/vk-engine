@@ -5,6 +5,9 @@
 
 std::optional<vk::ShaderModule> vkutil::load_shader_module(const char *file_path, vk::Device device)
 {
+#ifdef DEBUG
+    fmt::print("[ {} ]\tLoading shader module: {}\n", INFO_FMT("INFO"), file_path);
+#endif
     std::ifstream file(file_path, std::ios::ate | std::ios::binary);
     if (!file.is_open())
     {
@@ -25,6 +28,9 @@ std::optional<vk::ShaderModule> vkutil::load_shader_module(const char *file_path
         fmt::print(stderr, "[ {} ]\tFailed to create shader module!\n", ERROR_FMT("ERROR"));
         return std::nullopt;
     }
+#ifdef DEBUG
+    fmt::print("[ {} ]\tFinished loading shader module: {}\n", INFO_FMT("INFO"), file_path);
+#endif
     return module;
 }
 
