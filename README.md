@@ -1,5 +1,19 @@
 # vk-engine
 
+## Build Library
+
+The default build target is `debug`.
+```bash
+$ make lib # CONFIG=debug/release
+```
+
+## Build Examples
+
+The default build target is `debug`. The default example is `setup`.
+```bash
+$ make run # CONFIG=debug/release, ARGS=<cmd line args>
+```
+
 ## References
 * [Vulkan Guide](https://vkguide.dev/)
 * [Vulkan Tutorial](https://vulkan-tutorial.com/)
