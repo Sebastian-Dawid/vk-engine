@@ -3,7 +3,7 @@ SHELL := zsh
 
 .DEFAULT_GOAL := help
 
-.PHONY: clean run debug help
+.PHONY: clean run lib debug help
 
 BUILD_DIR = build
 ifndef CONFIG
@@ -15,6 +15,12 @@ endif
 
 clean:
 	rm -rf $(BUILD_DIR) tests/$(BUILD_DIR)
+
+lib:
+	@premake5 gmake2;\
+	cd $(BUILD_DIR);\
+	make config=$(CONFIG);\
+	cd ..
 
 run:
 	@premake5 gmake2;\
