@@ -102,7 +102,7 @@ vk::SamplerMipmapMode extract_mipmap_mode(fastgltf::Filter filter)
     }
 }
 
-std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath)
+std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath, std::array<std::uint32_t, 3> bindings)
 {
 #ifdef DEBUG
     fmt::print("[ {} ]\tLoading glTF: {}\n", INFO_FMT("INFO"), filepath);
@@ -213,27 +213,27 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
         gltf_metallic_roughness_t::material_constants_t constants{
             .color_factors = glm::vec4(mat.pbrData.baseColorFactor[0], mat.pbrData.baseColorFactor[1],
                     mat.pbrData.baseColorFactor[2], mat.pbrData.baseColorFactor[3]),
-            .metal_rought_factors = glm::vec4(mat.pbrData.metallicFactor, mat.pbrData.roughnessFactor, glm::vec2())
+            .metal_rough_factors = glm::vec4(mat.pbrData.metallicFactor, mat.pbrData.roughnessFactor, glm::vec2())
         };
         scene_material_constants[data_index] = constants;
 
         material_pass_e pass_type = (mat.alphaMode == fastgltf::AlphaMode::Blend) ? pass_type = material_pass_e::TRANSPARENT : material_pass_e::MAIN_COLOR;
         
-        // TODO: These binding should probably not be static
-        gltf_metallic_roughness_t::material_resources_t::buf_t buffer{ .binding = 0,
+        gltf_metallic_roughness_t::material_resources_t::buf_t buffer{ .binding = bindings[0],
             .buffer = file.material_data_buffer.buffer,
             .offset = static_cast<std::uint32_t>(data_index * sizeof(gltf_metallic_roughness_t::material_constants_t)),
             .size = sizeof(gltf_metallic_roughness_t::material_constants_t),
             .type = vk::DescriptorType::eUniformBuffer
         };
-        gltf_metallic_roughness_t::material_resources_t::img_t color_image{ .binding = 1,
+        gltf_metallic_roughness_t::material_resources_t::img_t color_image{ .binding = bindings[1],
             .image = engine->white_image,
             .sampler = engine->default_sampler_linear,
             .layout = vk::ImageLayout::eShaderReadOnlyOptimal,
             .type = vk::DescriptorType::eCombinedImageSampler
         };
+
         gltf_metallic_roughness_t::material_resources_t::img_t metal_rough_image = color_image;
-        metal_rough_image.binding = 2;
+        metal_rough_image.binding = bindings[2];
 
         gltf_metallic_roughness_t::material_resources_t material_resources{ .images = { color_image, metal_rough_image },
             .buffers = { buffer }
@@ -407,6 +407,14 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
 }
 
 void loaded_gltf_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
+{
+    for (auto& n : top_nodes)
+    {
+        n->draw(top_matrix, ctx);
+    }
+}
+
+void loaded_gltf_t::draw(const std::vector<glm::mat4>& top_matrix, draw_context_t& ctx)
 {
     for (auto& n : top_nodes)
     {

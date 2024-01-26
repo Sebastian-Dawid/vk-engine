@@ -49,12 +49,13 @@ struct loaded_gltf_t : public renderable_i
     allocated_buffer_t material_data_buffer;
     engine_t* creator;
 
-    glm::mat4 transform = glm::mat4(1.f);
+    std::vector<glm::mat4> transform = {};
 
     virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) override;
+    virtual void draw(const std::vector<glm::mat4>& top_matrix, draw_context_t& ctx) override;
 
     void clear_all();
     virtual ~loaded_gltf_t() { this->clear_all(); };
 };
 
-std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath);
+std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath, std::array<std::uint32_t, 3> bindings = { 0, 1, 2 });

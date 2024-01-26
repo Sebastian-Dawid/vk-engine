@@ -28,6 +28,7 @@ struct mesh_node_t : public node_t
 {
     std::shared_ptr<mesh_asset_t> mesh;
     virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) override;
+    virtual void draw(const std::vector<glm::mat4>& top_matrix, draw_context_t& ctx) override;
     virtual ~mesh_node_t() {};
 };
 
@@ -39,7 +40,7 @@ struct render_object_t
 
     material_instance_t* material;
     bounds_t bounds;
-    glm::mat4 transform;
+    std::vector<glm::mat4> transform;
     vk::DeviceAddress vertex_buffer_address;
 };
 
@@ -60,7 +61,7 @@ struct gltf_metallic_roughness_t
     struct material_constants_t
     {
         glm::vec4 color_factors;
-        glm::vec4 metal_rought_factors;
+        glm::vec4 metal_rough_factors;
         glm::vec4 extra[14];
     };
 
@@ -95,7 +96,8 @@ struct gltf_metallic_roughness_t
     /// `false` - if pipeline creation failed
     bool build_pipelines(engine_t* engine, std::string vertex, std::string fragment,
             std::size_t push_constants_size, std::vector<std::tuple<std::uint32_t, vk::DescriptorType>> bindings,
-            std::vector<vk::DescriptorSetLayout> external_layouts);
+            std::vector<vk::DescriptorSetLayout> external_layouts, std::vector<vk::VertexInputBindingDescription> input_bindings = {},
+            std::vector<vk::VertexInputAttributeDescription> input_attributes = {});
     void clear_resources(vk::Device device);
     /// Creates a new `material_instance_t` based on the given `material_resources_t`.
     /// Allocates and updates the descriptor set using the given `descriptor_allocator_growable_t`.
@@ -330,7 +332,7 @@ struct engine_t
     /// Returns:
     /// * `false` - if the model could not be loaded e.g. invalid path, buffer or texture could not be created
     /// * `true` - if the model was loaded successfully
-    bool load_model(std::string path, std::string name);
+    bool load_model(std::string path, std::string name, std::array<std::uint32_t, 3> bindings = { 0, 1, 2 });
 
     bool create_swapchain(std::uint32_t width, std::uint32_t height);
     bool resize_swapchain();

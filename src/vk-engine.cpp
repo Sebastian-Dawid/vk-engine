@@ -14,7 +14,7 @@
 #define BASE_DIR ""
 #endif
 
-bool is_visible(const render_object_t& obj, const glm::mat4& viewproj)
+std::vector<bool> is_visible(const render_object_t& obj, const glm::mat4& viewproj)
 {
     std::array<glm::vec3, 8> corners {
         glm::vec3( 1,  1,  1),
@@ -27,24 +27,30 @@ bool is_visible(const render_object_t& obj, const glm::mat4& viewproj)
         glm::vec3(-1, -1, -1),
     };
 
-    glm::mat4 matrix = viewproj * obj.transform;
+    std::vector<bool> visible;
 
-    glm::vec3 min( 1.5,  1.5,  1.5);
-    glm::vec3 max(-1.5, -1.5, -1.5);
-
-    for (auto& c : corners)
+    for (glm::mat4 mat : obj.transform)
     {
-        glm::vec4 v = matrix * glm::vec4(obj.bounds.origin + (c * obj.bounds.extents), 1.f);
-        v.x = v.x / v.w;
-        v.y = v.y / v.y;
-        v.z = v.z / v.w;
+        glm::mat4 matrix = viewproj * mat;
 
-        min = glm::min(glm::vec3(v), min);
-        max = glm::max(glm::vec3(v), max);
+        glm::vec3 min( 1.5,  1.5,  1.5);
+        glm::vec3 max(-1.5, -1.5, -1.5);
+
+        for (auto& c : corners)
+        {
+            glm::vec4 v = matrix * glm::vec4(obj.bounds.origin + (c * obj.bounds.extents), 1.f);
+            v.x = v.x / v.w;
+            v.y = v.y / v.y;
+            v.z = v.z / v.w;
+
+            min = glm::min(glm::vec3(v), min);
+            max = glm::max(glm::vec3(v), max);
+        }
+        if (min.z > 1.f || max.z < 0.f || min.x > 1.f || max.x < -1.f || min.y > 1.f || max.y < -1.f) visible.push_back(false);
+        else visible.push_back(true);
     }
 
-    if (min.z > 1.f || max.z < 0.f || min.x > 1.f || max.x < -1.f || min.y > 1.f || max.y < -1.f) return false;
-    return true;
+    return visible;
 }
 
 void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
@@ -57,7 +63,29 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
             .index_buffer = this->mesh->mesh_buffer.index_buffer.buffer,
             .material = &s.material->data,
             .bounds = s.bounds,
-            .transform = node_matrix,
+            .transform = { node_matrix },
+            .vertex_buffer_address = mesh->mesh_buffer.vertex_buffer_address
+        };
+        ctx.opaque_surfaces.push_back(def);
+    }
+    node_t::draw(top_matrix, ctx);
+}
+
+void mesh_node_t::draw(const std::vector<glm::mat4>& top_matrix, draw_context_t& ctx)
+{
+    std::vector<glm::mat4> transforms;
+    for (glm::mat4 mat : top_matrix)
+    {
+        transforms.push_back(mat * this->world_transform);
+    }
+    for (auto& s : mesh->surfaces)
+    {
+        render_object_t def{ .index_count = s.count,
+            .first_index = s.start_index,
+            .index_buffer = this->mesh->mesh_buffer.index_buffer.buffer,
+            .material = &s.material->data,
+            .bounds = s.bounds,
+            .transform = transforms,
             .vertex_buffer_address = mesh->mesh_buffer.vertex_buffer_address
         };
         ctx.opaque_surfaces.push_back(def);
@@ -67,7 +95,8 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
 
 bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string vertex, std::string fragment,
         std::size_t push_constants_size, std::vector<std::tuple<std::uint32_t, vk::DescriptorType>> bindings,
-        std::vector<vk::DescriptorSetLayout> external_layouts)
+        std::vector<vk::DescriptorSetLayout> external_layouts, std::vector<vk::VertexInputBindingDescription> input_bindings,
+        std::vector<vk::VertexInputAttributeDescription> input_attributes)
 {
     auto vert_shader = vkutil::load_shader_module(vertex.c_str(), engine->device.dev);
     if (!vert_shader.has_value()) return false;
@@ -99,7 +128,7 @@ bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string ve
     pipeline_builder_t pipeline_builder;
     pipeline_builder.pipeline_layout = new_layout;
     // TODO: Pipeline settings should probably be an input too
-    auto ret_pipeline = pipeline_builder.set_shaders(vert_shader.value(), frag_shader.value())
+    pipeline_builder.set_shaders(vert_shader.value(), frag_shader.value())
         .set_input_topology(vk::PrimitiveTopology::eTriangleList)
         .set_polygon_mode(vk::PolygonMode::eFill)
         .set_cull_mode(vk::CullModeFlagBits::eNone, vk::FrontFace::eClockwise)
@@ -107,8 +136,12 @@ bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string ve
         .disable_blending()
         .enable_depthtest(true, vk::CompareOp::eLess)
         .set_color_attachment_format(engine->draw_image.format)
-        .set_depth_format(engine->depth_image.format)
-        .build(engine->device.dev);
+        .set_depth_format(engine->depth_image.format);
+
+    for (auto ib : input_bindings) pipeline_builder.add_vertex_input_binding(ib.binding, ib.stride, ib.inputRate);
+    for (auto ia : input_attributes) pipeline_builder.add_vertex_input_attribute(ia.binding, ia.location, ia.format, ia.offset);
+
+    auto ret_pipeline = pipeline_builder.build(engine->device.dev);
     if (!ret_pipeline.has_value()) return false;
     this->opaque_pipeline.pipeline = ret_pipeline.value();
     ret_pipeline = pipeline_builder.enable_blending_additive()
@@ -319,8 +352,17 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     {
         // NOTE: Frustum culling on small scenes appears to perform worse than just rendering off screen objects too.
         // TODO: Needs further testing.
-        if (is_visible(this->main_draw_context.opaque_surfaces[i], this->scene_data.gpu_data.viewproj))
-            opaque_draws.push_back(i);
+        // NOTE: Right now I only check if one instance is visible. There probably is a better way of doing that to reduce
+        //       the number of instances that need to be rendered.
+        auto visible = is_visible(this->main_draw_context.opaque_surfaces[i], this->scene_data.gpu_data.viewproj);
+        for (auto vis : visible)
+        {
+            if (vis)
+            {
+                opaque_draws.push_back(i);
+                break;
+            }
+        }
     }
 
     // BUG: This seems to break transparent objects when. Only occasionally though.
@@ -391,13 +433,27 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
             cmd.bindIndexBuffer(obj.index_buffer, 0, vk::IndexType::eUint32);
         }
 
-        gpu_draw_push_constants_t push_constants{ .world = obj.transform,
+        gpu_draw_push_constants_t push_constants{ .world = (obj.transform.size() > 1) ? glm::mat4(1) : obj.transform[0],
             .vertex_buffer = obj.vertex_buffer_address };
         cmd.pushConstants(obj.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
-        cmd.drawIndexed(obj.index_count, 1, obj.first_index, 0, 0);
+        if (obj.transform.size() > 1)
+        {
+            auto ret = this->create_buffer(sizeof(glm::mat4) * obj.transform.size(), vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+            if (!ret.has_value()) return;
+            allocated_buffer_t vtx_buf = ret.value();
+            this->get_current_frame().deletion_queue.push_function([=, this]() { this->destroy_buffer(vtx_buf); });
+            std::memcpy(vtx_buf.info.pMappedData, obj.transform.data(), sizeof(glm::mat4) * obj.transform.size());
+            vk::DeviceSize offsets[1] = { 0 };
+            cmd.bindVertexBuffers(0, vtx_buf.buffer, offsets);
+        }
+        else
+        {
+            cmd.bindVertexBuffers(0, VK_NULL_HANDLE, {});
+        }
+        cmd.drawIndexed(obj.index_count, obj.transform.size(), obj.first_index, 0, 0);
 
         this->stats.drawcall_count++;
-        this->stats.triangle_count += obj.index_count / 3;
+        this->stats.triangle_count += obj.transform.size() * obj.index_count / 3;
     };
 
     for (auto& r : opaque_draws)
@@ -1051,9 +1107,9 @@ bool engine_t::init_default_data()
     return true;
 }
 
-bool engine_t::load_model(std::string path, std::string name)
+bool engine_t::load_model(std::string path, std::string name, std::array<std::uint32_t, 3> bindings)
 {
-    auto structured_file = load_gltf(this, path);
+    auto structured_file = load_gltf(this, path, bindings);
     if (!structured_file.has_value()) return false;
     this->loaded_scenes[name] = structured_file.value();
     return true;

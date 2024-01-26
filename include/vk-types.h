@@ -67,6 +67,7 @@ struct draw_context_t;
 struct renderable_i
 {
     virtual void draw(const glm::mat4& top_matrix, draw_context_t& ctx) = 0;
+    virtual void draw(const std::vector<glm::mat4>& top_matrix, draw_context_t& ctx) = 0;
 };
 
 struct node_t : public renderable_i
@@ -93,5 +94,14 @@ struct node_t : public renderable_i
             c->draw(top_matrix, ctx);
         }
     }
+
+    virtual void draw(const std::vector<glm::mat4>& top_matrix, draw_context_t& ctx) override
+    {
+        for (auto& c : this->children)
+        {
+            c->draw(top_matrix, ctx);
+        }
+    }
+
     virtual ~node_t(){};
 };

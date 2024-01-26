@@ -141,11 +141,23 @@ pipeline_builder_t& pipeline_builder_t::enable_depthtest(const bool depth_write_
     return *this;
 }
 
+pipeline_builder_t& pipeline_builder_t::add_vertex_input_binding(std::uint32_t binding, std::size_t stride, vk::VertexInputRate input_rate)
+{
+    this->vertex_input_binding_descriptions.push_back(vk::VertexInputBindingDescription(binding, stride, input_rate));
+    return *this;
+}
+
+pipeline_builder_t& pipeline_builder_t::add_vertex_input_attribute(std::uint32_t binding, std::uint32_t location, vk::Format format, std::size_t offset)
+{
+    this->vertex_input_attribute_descriptions.push_back(vk::VertexInputAttributeDescription(location, binding, format, offset));
+    return *this;
+}
+
 std::optional<vk::Pipeline> pipeline_builder_t::build(vk::Device dev)
 {
     vk::PipelineViewportStateCreateInfo viewport_state({}, 1, {}, 1);
     vk::PipelineColorBlendStateCreateInfo color_blending({}, VK_FALSE, vk::LogicOp::eCopy, this->color_blend_attachment);
-    vk::PipelineVertexInputStateCreateInfo vertex_input_info;
+    vk::PipelineVertexInputStateCreateInfo vertex_input_info({}, this->vertex_input_binding_descriptions, this->vertex_input_attribute_descriptions);
     vk::DynamicState state[] = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
     vk::PipelineDynamicStateCreateInfo dynamic_info({}, state);
     vk::GraphicsPipelineCreateInfo pipeline_info({}, this->shader_stages, &vertex_input_info, &this->input_assembly, {}, &viewport_state, &this->rasterizer,
