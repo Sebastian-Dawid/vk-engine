@@ -35,7 +35,7 @@ workspace "template"
         language "C++"
         targetdir "build/lib/%{cfg.buildcfg}"
         buildoptions { "-Wall" }
-        defines { "BASE_DIR=\"" .. cwd .. "\"" }
+        defines { "BASE_DIR=\"" .. cwd .. "\"", "GLM_ENABLE_EXPERIMENTAL" }
         filter "configurations:Release"
             buildoptions { "-Werror" }
 

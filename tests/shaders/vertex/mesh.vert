@@ -34,9 +34,9 @@ void main()
 {
     vertex_t v = push_constants.vertex_buffer.vertices[gl_VertexIndex];
     vec4 position = vec4(v.position, 1.f);
-    gl_Position = scene_data.viewproj * push_constants.render_matrix * in_transform * position;
+    gl_Position = scene_data.viewproj * in_transform * position;
 
-    out_normal = normalize((push_constants.render_matrix * in_transform * vec4(v.normal, 0.f)).xyz);
+    out_normal = normalize((in_transform * vec4(v.normal, 0.f)).xyz);
     out_color = v.color.xyz * material_data.color_factors.xyz;
     out_uv = v.uv;
 }
