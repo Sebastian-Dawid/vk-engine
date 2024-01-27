@@ -19,16 +19,16 @@ workspace "template"
         language "C++"
         targetdir "build/lib/%{cfg.buildcfg}"
 
-        includedirs { "imgui", "imgui/backends" }
-        files { "imgui/*.cpp", "imgui/backends/imgui_impl_vulkan.cpp", "imgui/backends/imgui_impl_glfw.cpp" }
+        includedirs { "external/imgui", "external/imgui/backends" }
+        files { "external/imgui/*.cpp", "external/imgui/backends/imgui_impl_vulkan.cpp", "external/imgui/backends/imgui_impl_glfw.cpp" }
 
     project "fastgltf"
         kind "StaticLib"
         language "C++"
         targetdir "build/lib/%{cfg.buildcfg}"
 
-        includedirs { "fastgltf/include" }
-        files { "fastgltf/src/**.cpp" }
+        includedirs { "external/fastgltf/include" }
+        files { "external/fastgltf/src/**.cpp" }
 
     project "vk-engine"
         kind "StaticLib"
@@ -43,7 +43,7 @@ workspace "template"
             buildoptions { "-w" }
         filter {}
 
-        includedirs { "include", "src/includes", "imgui", "fastgltf/include" }
+        includedirs { "include", "src/includes", "external/imgui", "external/fastgltf/include", "external/vulkan" }
         files { "src/**.cpp" }
 
     project "test-setup"
@@ -59,6 +59,6 @@ workspace "template"
 
         filter {}
 
-        includedirs { "include", "imgui" }
+        includedirs { "include", "external/imgui" }
         files { "tests/setup.cpp", "tests/shaders/**" }
         links { "fmt", "glfw", "vulkan", "vk-engine", "imgui", "fastgltf" }

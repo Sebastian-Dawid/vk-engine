@@ -433,23 +433,17 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
             cmd.bindIndexBuffer(obj.index_buffer, 0, vk::IndexType::eUint32);
         }
 
-        gpu_draw_push_constants_t push_constants{ .world = (obj.transform.size() > 1) ? glm::mat4(1) : obj.transform[0],
-            .vertex_buffer = obj.vertex_buffer_address };
+        gpu_draw_push_constants_t push_constants{ .world = glm::mat4(1), .vertex_buffer = obj.vertex_buffer_address };
         cmd.pushConstants(obj.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
-        if (obj.transform.size() > 1)
-        {
-            auto ret = this->create_buffer(sizeof(glm::mat4) * obj.transform.size(), vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-            if (!ret.has_value()) return;
-            allocated_buffer_t vtx_buf = ret.value();
-            this->get_current_frame().deletion_queue.push_function([=, this]() { this->destroy_buffer(vtx_buf); });
-            std::memcpy(vtx_buf.info.pMappedData, obj.transform.data(), sizeof(glm::mat4) * obj.transform.size());
-            vk::DeviceSize offsets[1] = { 0 };
-            cmd.bindVertexBuffers(0, vtx_buf.buffer, offsets);
-        }
-        else
-        {
-            cmd.bindVertexBuffers(0, VK_NULL_HANDLE, {});
-        }
+        
+        auto ret = this->create_buffer(sizeof(glm::mat4) * obj.transform.size(), vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        if (!ret.has_value()) return;
+        allocated_buffer_t vtx_buf = ret.value();
+        this->get_current_frame().deletion_queue.push_function([=, this]() { this->destroy_buffer(vtx_buf); });
+        std::memcpy(vtx_buf.info.pMappedData, obj.transform.data(), sizeof(glm::mat4) * obj.transform.size());
+        vk::DeviceSize offsets[1] = { 0 };
+        cmd.bindVertexBuffers(0, vtx_buf.buffer, offsets);
+        
         cmd.drawIndexed(obj.index_count, obj.transform.size(), obj.first_index, 0, 0);
 
         this->stats.drawcall_count++;
