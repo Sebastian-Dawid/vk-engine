@@ -39,7 +39,6 @@ struct pipeline_builder_t
     pipeline_builder_t& set_depth_format(const vk::Format format);
     pipeline_builder_t& disable_depthtest();
     pipeline_builder_t& enable_depthtest(const bool depth_write_enable, const vk::CompareOp op);
-    // TODO: Maybe overload these functions to accept vectors of bindings/attributes
     pipeline_builder_t& add_vertex_input_binding(std::uint32_t binding, std::size_t stride, vk::VertexInputRate input_rate);
     pipeline_builder_t& add_vertex_input_attribute(std::uint32_t binding, std::uint32_t location, vk::Format format, std::size_t offset);
     std::optional<vk::Pipeline> build(vk::Device dev);
