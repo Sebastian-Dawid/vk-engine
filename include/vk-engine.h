@@ -292,6 +292,9 @@ struct engine_t
     /// * `false` - if creation of any allocator or allocation of any descriptor fails
     /// * `true` - if all allocators were created and no allocations failed
     bool init_descriptors();
+
+    // TODO: Which pipelines to create should not be set by the engine.
+    //
     /// Initializes background pipeline and material pipelines.
     /// Calls other `init_*` functions
     ///
@@ -299,6 +302,9 @@ struct engine_t
     /// * `false` - if initialization of any pipeline failed
     /// * `true` - if all pipelines were initialized successfully
     bool init_pipelines();
+
+    // TODO: See above.
+    //
     /// Initializes the background compute pipeline.
     ///
     /// Returns:
@@ -350,6 +356,8 @@ struct engine_t
 
     void update_scene();
 
+    // TODO: Seperating compute and geometry into only two functions might not be a good idea.
+    //       See deferred shading, shadow mapping etc.
     void draw_geometry(vk::CommandBuffer cmd);
     void draw_background(vk::CommandBuffer cmd);
     void draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view);

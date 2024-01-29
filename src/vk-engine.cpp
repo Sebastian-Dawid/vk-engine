@@ -373,6 +373,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
         });
     */
     
+    // TODO: Used attachment should not be static.
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
     vk::RenderingAttachmentInfo depth_attachment(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
             vk::AttachmentStoreOp::eStore);
@@ -380,6 +381,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment, &depth_attachment);
     cmd.beginRendering(render_info);
 
+    // TODO: Scene data should not be restricted to this one struct.
     auto ret_buf = create_buffer(sizeof(gpu_scene_data_t), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
     if (!ret_buf.has_value()) return;
 
@@ -432,6 +434,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
             cmd.bindIndexBuffer(obj.index_buffer, 0, vk::IndexType::eUint32);
         }
 
+        // TODO: Push constants should not be restricted to this one struct.
         gpu_draw_push_constants_t push_constants{ .world = glm::mat4(1), .vertex_buffer = obj.vertex_buffer_address };
         cmd.pushConstants(obj.material->pipeline->layout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(gpu_draw_push_constants_t), &push_constants);
         
@@ -525,8 +528,6 @@ bool engine_t::draw()
         return false;
     }
 
-    // this->draw_extent.width = this->draw_image.extent.width;
-    // this->draw_extent.height = this->draw_image.extent.height;
     vk::CommandBufferBeginInfo begin_info(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     if (result = cmd.begin(&begin_info); result != vk::Result::eSuccess)
     {
@@ -534,6 +535,7 @@ bool engine_t::draw()
         return false;
     }
 
+    // NOTE: This might not be ideal. Do I want to restrict the user to this setup?
     vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
 
     this->draw_background(cmd);
