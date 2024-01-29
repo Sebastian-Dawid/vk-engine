@@ -179,9 +179,6 @@ struct engine_t
         bool resize_requested;
     } window;
  
-    // TODO: This probably should not be part of the engine itself, but the consumers responsibility
-    camera_t main_camera;
-
     vk::PhysicalDevice physical_device;
     struct device_t
     {
@@ -263,6 +260,8 @@ struct engine_t
     std::unordered_map<std::string, std::shared_ptr<loaded_gltf_t>> loaded_scenes;
 
     std::function<void()> define_imgui_windows = [](){};
+    std::function<void()> input_handler = [](){};
+    std::function<void()> update = [](){};
     const bool use_imgui = false;
     bool show_stats = false;
     engine_stats_t stats;

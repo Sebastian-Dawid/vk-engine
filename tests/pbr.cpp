@@ -1,5 +1,6 @@
 #include <imgui.h>
 #include <filesystem>
+#include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <vk-engine.h>
 
@@ -8,6 +9,10 @@ int main()
     std::string file = "/tests/assets/sgb.glb";
     std::string pwd = std::filesystem::current_path().string();
     engine_t engine(1024, 1024, "pbr", true, true);
+
+    camera_t cam{ .position = glm::vec3(0.f, 0.f, 2.f) };
+    glfwSetWindowUserPointer(engine.window.win, &cam);
+
     if (!engine.init_vulkan("pbr")) return EXIT_FAILURE;
     if (!engine.metal_rough_material.build_pipelines(&engine, pwd + "/tests/build/shaders/mesh.vert.spv", pwd + "/tests/build/shaders/mesh.frag.spv",
                 sizeof(gpu_draw_push_constants_t), { {0, vk::DescriptorType::eUniformBuffer}, {1, vk::DescriptorType::eCombinedImageSampler}, {2, vk::DescriptorType::eCombinedImageSampler} },
@@ -37,6 +42,25 @@ int main()
             ImGui::InputFloat4("light dir", (float*) &engine.scene_data.gpu_data.sunlight_dir);
             ImGui::End();
         }
+    };
+
+    engine.input_handler = [&]()
+    {
+        if (glfwGetKey(engine.window.win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(engine.window.win, GLFW_TRUE);
+        cam.process_glfw_event(engine.window.win);
+    };
+
+    engine.update = [&]()
+    {
+        engine.background_effects[0].data.data3.x = engine.window.width;
+        engine.background_effects[0].data.data3.y = engine.window.height;
+        engine.background_effects[0].data.data3.z = engine.render_scale;
+        cam.update();
+
+        engine.scene_data.gpu_data.view = cam.get_view_matrix();
+        engine.scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)engine.window.width / (float)engine.window.height, .1f, 10000.f);
+        engine.scene_data.gpu_data.proj[1][1] *= -1;
+        engine.scene_data.gpu_data.viewproj = engine.scene_data.gpu_data.proj * engine.scene_data.gpu_data.view ;
     };
 
     engine.run();

@@ -217,9 +217,7 @@ engine_t::engine_t(std::uint32_t width, std::uint32_t height, std::string app_na
     this->window.width = width;
     this->window.height = height;
     loaded_engine = this;
-    this->main_camera = camera_t{ .velocity = glm::vec3(0.f), .position = glm::vec3(0.f, 0.0f, 1.f), .pitch = 0, .yaw = 0 };
     glfwSetFramebufferSizeCallback(this->window.win, engine_t::framebuffer_size_callback);
-    glfwSetWindowUserPointer(this->window.win, &this->main_camera);
     glfwSetCursorPosCallback(this->window.win, cursor_pos_callback);
     this->show_stats = show_stats;
 }
@@ -268,9 +266,7 @@ bool engine_t::run()
         auto start = std::chrono::system_clock::now();
 
         glfwPollEvents();
-        if (glfwGetKey(this->window.win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(this->window.win, GLFW_TRUE);
-
-        this->main_camera.process_glfw_event(this->window.win);
+        this->input_handler();
 
         if (this->window.resize_requested)
         {
@@ -316,10 +312,18 @@ void engine_t::update_scene()
 {
     auto start = std::chrono::system_clock::now();
 
+    this->update();
+    /*
     this->background_effects[0].data.data3.x = this->window.width;
     this->background_effects[0].data.data3.y = this->window.height;
     this->background_effects[0].data.data3.z = this->render_scale;
     this->main_camera.update();
+
+    this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
+    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 10000.f);
+    this->scene_data.gpu_data.proj[1][1] *= -1;
+    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view ;
+    */
 
     this->main_draw_context.opaque_surfaces.clear();
     this->main_draw_context.transparent_surfaces.clear();
@@ -328,11 +332,6 @@ void engine_t::update_scene()
     {
         v->draw(v->transform, this->main_draw_context);
     }
-
-    this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
-    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 10000.f);
-    this->scene_data.gpu_data.proj[1][1] *= -1;
-    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view ;
 
     auto end = std::chrono::system_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
