@@ -169,7 +169,7 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
                 extract_filter(sampler.minFilter.value_or(fastgltf::Filter::Nearest)),
                 extract_mipmap_mode(sampler.minFilter.value_or(fastgltf::Filter::Nearest)),
                 {}, {}, {}, {}, {}, {}, {}, {}, 0, VK_LOD_CLAMP_NONE);
-        auto new_sampler = engine->device.dev.createSampler(sampler_info);
+        auto [result, new_sampler] = engine->device.dev.createSampler(sampler_info);
         file.samplers.push_back(new_sampler);
     }
 

@@ -1,8 +1,8 @@
 #pragma once
 
+#include "vk-images.h"
 #include <cstdint>
 #include <functional>
-#define VULKAN_HPP_NO_EXCEPTIONS
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include <VkBootstrap.h>
@@ -221,11 +221,13 @@ struct engine_t
     } draw_descriptor;
 
     // TODO: This should not be an instance variable but a local when creating the background pipelines.
-    struct
+    struct pipeline_t
     {
         vk::Pipeline pipeline;
         vk::PipelineLayout layout;
     } gradient_pipeline;
+
+    std::vector<pipeline_t> pipelines;
 
     struct
     {
@@ -273,18 +275,21 @@ struct engine_t
     /// * `false` - if any step of the initialization failed.
     /// * `true` - if the vulkan context was created successfully
     bool init_vulkan(std::string app_name = "vk-app");
+
     /// Initializes the command pools and buffers for the frames and immediate submission.
     ///
     /// Returns:
     /// * `false` - if creation of any pool or buffer failed
     /// * `true` - if all pools and buffers were created successfully
     bool init_commands();
+
     /// Initializes the semaphores and fences for the frames and immediate submissions.
     ///
     /// Returns:
     /// * `false` - if creation of any semaphore or fence failed
     /// * `true` - if all semaphores and fences were created successfully
     bool init_sync_structures();
+
     /// Initializes the global descriptor allocator and the descriptor allocators for the frames.
     /// Also initializes the descriptors for the background pipeline and scene data.
     ///
@@ -293,15 +298,12 @@ struct engine_t
     /// * `true` - if all allocators were created and no allocations failed
     bool init_descriptors();
 
-    // TODO: Which pipelines to create should not be set by the engine.
-    //
-    /// Initializes background pipeline and material pipelines.
-    /// Calls other `init_*` functions
+    /// Lambda function that should be set to create pipelines.
     ///
     /// Returns:
     /// * `false` - if initialization of any pipeline failed
     /// * `true` - if all pipelines were initialized successfully
-    bool init_pipelines();
+    std::function<bool()> init_pipelines = [](){ return true; };
 
     // TODO: See above.
     //
@@ -311,12 +313,14 @@ struct engine_t
     /// * `false` - if any step of the pipeline initialization failed
     /// * `true` - if the pipeline was created successfully
     bool init_background_pipelines();
+
     /// Initializes ImGui. Creates Descriptor pool for ImGui.
     ///
     /// Returns:
     /// * `false` - if pool creation or ImGui font texture creation failed
     /// * `true` - if ImGui was initialized successfully
     bool init_imgui();
+
     /// Initializes some default textures e.g. white, grey, black and error checkerboard.
     ///
     /// Returns:
@@ -361,6 +365,25 @@ struct engine_t
     void draw_geometry(vk::CommandBuffer cmd);
     void draw_background(vk::CommandBuffer cmd);
     void draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view);
+
+    std::function<vk::ImageLayout(vk::CommandBuffer cmd, std::uint32_t swapchain_img_idx)> draw_cmd = [this](vk::CommandBuffer cmd, std::uint32_t swapchain_img_idx) -> vk::ImageLayout
+    {
+        vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
+
+        this->draw_background(cmd);
+
+        vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eColorAttachmentOptimal);
+        vkutil::transition_image(cmd, this->depth_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal);
+
+        this->draw_geometry(cmd);
+
+        vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
+        vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+
+        vkutil::copy_image_to_image(cmd, this->draw_image.image, this->swapchain.images[swapchain_img_idx], this->draw_extent, this->swapchain.extent);
+        return vk::ImageLayout::eTransferDstOptimal;
+    };
+
     bool draw();
     bool run();
 

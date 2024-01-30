@@ -1,4 +1,3 @@
-#include <filesystem>
 #include <vk-engine.h>
 #include <vk-images.h>
 #include <error_fmt.h>
@@ -313,17 +312,6 @@ void engine_t::update_scene()
     auto start = std::chrono::system_clock::now();
 
     this->update();
-    /*
-    this->background_effects[0].data.data3.x = this->window.width;
-    this->background_effects[0].data.data3.y = this->window.height;
-    this->background_effects[0].data.data3.z = this->render_scale;
-    this->main_camera.update();
-
-    this->scene_data.gpu_data.view = this->main_camera.get_view_matrix();
-    this->scene_data.gpu_data.proj = glm::perspective(glm::radians(70.f), (float)this->window.width / (float)this->window.height, .1f, 10000.f);
-    this->scene_data.gpu_data.proj[1][1] *= -1;
-    this->scene_data.gpu_data.viewproj = this->scene_data.gpu_data.proj * this->scene_data.gpu_data.view ;
-    */
 
     this->main_draw_context.opaque_surfaces.clear();
     this->main_draw_context.transparent_surfaces.clear();
@@ -535,26 +523,18 @@ bool engine_t::draw()
         return false;
     }
 
-    // NOTE: This might not be ideal. Do I want to restrict the user to this setup?
-    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
+    vk::ImageLayout final_layout = this->draw_cmd(cmd, swapchain_img_idx);
 
-    this->draw_background(cmd);
-    
-    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eColorAttachmentOptimal);
-    vkutil::transition_image(cmd, this->depth_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal);
-
-    this->draw_geometry(cmd);
-
-    vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
-    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-    
-    vkutil::copy_image_to_image(cmd, this->draw_image.image, this->swapchain.images[swapchain_img_idx], this->draw_extent, this->swapchain.extent);
-
-    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eColorAttachmentOptimal);
-    
-    if (this->use_imgui) this->draw_imgui(cmd, this->swapchain.views[swapchain_img_idx]);
-    
-    vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
+    if (this->use_imgui)
+    {
+        vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], final_layout, vk::ImageLayout::eColorAttachmentOptimal);
+        this->draw_imgui(cmd, this->swapchain.views[swapchain_img_idx]);
+        vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
+    }
+    else
+    {
+        vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], final_layout, vk::ImageLayout::ePresentSrcKHR);
+    }
 
     if (result = cmd.end(); result != vk::Result::eSuccess)
     {
@@ -930,12 +910,6 @@ bool engine_t::init_descriptors()
             });
 
     return true;
-}
-
-bool engine_t::init_pipelines()
-{
-    if (!this->init_background_pipelines()) return false;
-    return true;//this->metal_rough_material.build_pipelines(this);
 }
 
 bool engine_t::init_background_pipelines()

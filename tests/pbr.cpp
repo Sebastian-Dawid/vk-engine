@@ -13,14 +13,18 @@ int main()
     camera_t cam{ .position = glm::vec3(0.f, 0.f, 2.f) };
     glfwSetWindowUserPointer(engine.window.win, &cam);
 
+    engine.init_pipelines = [&]() -> bool { return engine.init_background_pipelines(); };
+
     if (!engine.init_vulkan("pbr")) return EXIT_FAILURE;
+    std::vector<vk::VertexInputBindingDescription> input_bindings = { vk::VertexInputBindingDescription(0, sizeof(glm::mat4), vk::VertexInputRate::eInstance) };
+    std::vector<vk::VertexInputAttributeDescription> input_attriubtes = { vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32A32Sfloat, 0),
+        vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 4),
+        vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 8),
+        vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 12)
+    };
     if (!engine.metal_rough_material.build_pipelines(&engine, pwd + "/tests/build/shaders/mesh.vert.spv", pwd + "/tests/build/shaders/mesh.frag.spv",
                 sizeof(gpu_draw_push_constants_t), { {0, vk::DescriptorType::eUniformBuffer}, {1, vk::DescriptorType::eCombinedImageSampler}, {2, vk::DescriptorType::eCombinedImageSampler} },
-                {engine.scene_data.layout}, { vk::VertexInputBindingDescription(0, sizeof(glm::mat4), vk::VertexInputRate::eInstance) },
-                { vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32A32Sfloat, 0),
-                vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 4),
-                vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 8),
-                vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 12)})) return EXIT_FAILURE;
+                {engine.scene_data.layout}, input_bindings, input_attriubtes)) return EXIT_FAILURE;
     engine.load_model(pwd + file, "sgb");
     engine.loaded_scenes["sgb"]->transform.push_back(glm::scale(glm::mat4(1), glm::vec3(0.01f, 0.01f, 0.01f)));
 

@@ -13,7 +13,9 @@ int main(int argc, char** argv)
     
     camera_t cam{ .position = glm::vec3(0.f, 0.f, 2.f) };
     glfwSetWindowUserPointer(engine.window.win, &cam);
-    
+ 
+    engine.init_pipelines = [&]() -> bool { return engine.init_background_pipelines(); };
+
     if (!engine.init_vulkan("setup-test"))
     {
         return EXIT_FAILURE;

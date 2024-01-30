@@ -4,7 +4,6 @@
 #include <deque>
 #include <optional>
 #include <span>
-#define VULKAN_HPP_NO_EXCEPTIONS
 #include <vulkan/vulkan.hpp>
 
 struct descriptor_layout_builder_t
