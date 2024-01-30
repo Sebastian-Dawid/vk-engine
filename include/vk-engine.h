@@ -394,3 +394,6 @@ struct engine_t
     engine_t(std::uint32_t width = 1024, std::uint32_t height = 1024, std::string app_name = "vk-app", bool show_stats = false, bool use_imgui = false);
     ~engine_t();
 };
+
+std::vector<std::uint32_t> frustum_culling(std::vector<render_object_t> opaque_surfaces, glm::mat4 viewproj);
+void sort_surfaces(std::vector<std::uint32_t>& opaque_draws, std::vector<render_object_t> opaque_surfaces);

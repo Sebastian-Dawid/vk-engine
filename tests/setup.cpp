@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
+#include <glm/gtx/transform.hpp>
 #include <vk-engine.h>
 
 int main(int argc, char** argv)
@@ -20,13 +21,20 @@ int main(int argc, char** argv)
     {
         return EXIT_FAILURE;
     }
+    std::vector<vk::VertexInputBindingDescription> input_bindings = { vk::VertexInputBindingDescription(0, sizeof(glm::mat4), vk::VertexInputRate::eInstance) };
+    std::vector<vk::VertexInputAttributeDescription> input_attriubtes = { vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32A32Sfloat, 0),
+        vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 4),
+        vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 8),
+        vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 12)
+    };
     if (!engine.metal_rough_material.build_pipelines(&engine, pwd + "/tests/build/shaders/mesh.vert.spv", pwd + "/tests/build/shaders/mesh.frag.spv",
                 sizeof(gpu_draw_push_constants_t), { {0, vk::DescriptorType::eUniformBuffer}, {1, vk::DescriptorType::eCombinedImageSampler}, {2, vk::DescriptorType::eCombinedImageSampler} },
-                { engine.scene_data.layout }))
+                { engine.scene_data.layout }, input_bindings, input_attriubtes))
     {
         return EXIT_FAILURE;
     }
     engine.load_model(pwd + file, "structure");
+    engine.loaded_scenes["structure"]->transform.push_back(glm::mat4(1));
 
     engine.define_imgui_windows = [&]()
     {

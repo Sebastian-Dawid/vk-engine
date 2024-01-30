@@ -67,6 +67,20 @@ int main()
         engine.scene_data.gpu_data.viewproj = engine.scene_data.gpu_data.proj * engine.scene_data.gpu_data.view ;
     };
 
+    engine.draw_cmd = [&](vk::CommandBuffer cmd, std::uint32_t swapchain_img_idx) -> vk::ImageLayout
+    {
+        vkutil::transition_image(cmd, engine.draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+        vkutil::transition_image(cmd, engine.depth_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal);
+
+        engine.draw_geometry(cmd);
+
+        vkutil::transition_image(cmd, engine.draw_image.image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
+        vkutil::transition_image(cmd, engine.swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+
+        vkutil::copy_image_to_image(cmd, engine.draw_image.image, engine.swapchain.images[swapchain_img_idx], engine.draw_extent, engine.swapchain.extent);
+        return vk::ImageLayout::eTransferDstOptimal;
+    };
+
     engine.run();
     return EXIT_SUCCESS;
 }

@@ -52,6 +52,40 @@ std::vector<bool> is_visible(const render_object_t& obj, const glm::mat4& viewpr
     return visible;
 }
 
+std::vector<std::uint32_t> frustum_culling(std::vector<render_object_t> opaque_surfaces, glm::mat4 viewproj)
+{
+    std::vector<std::uint32_t> opaque_draws;
+    opaque_draws.reserve(opaque_surfaces.size());
+
+    for (std::uint32_t i = 0; i < opaque_surfaces.size(); ++i)
+    {
+        // NOTE: Frustum culling on small scenes appears to perform worse than just rendering off screen objects too.
+        // TODO: Needs further testing.
+        // NOTE: Right now I only check if one instance is visible. There probably is a better way of doing that to reduce
+        //       the number of instances that need to be rendered.
+        auto visible = is_visible(opaque_surfaces[i], viewproj);
+        for (auto vis : visible)
+        {
+            if (vis)
+            {
+                opaque_draws.push_back(i);
+                break;
+            }
+        }
+    }
+    return opaque_draws;
+}
+
+void sort_surfaces(std::vector<std::uint32_t>& opaque_draws, std::vector<render_object_t> opaque_surfaces)
+{
+    std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
+            const render_object_t& a = opaque_surfaces[i];
+            const render_object_t& b = opaque_surfaces[j];
+            if (a.material == b.material) return a.index_buffer < b.index_buffer;
+            return a.material < b.material;
+            });
+}
+
 void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
 {
     glm::mat4 node_matrix = top_matrix * this->world_transform;
@@ -326,40 +360,18 @@ void engine_t::update_scene()
     this->stats.scene_update_time = elapsed.count() / 1000.f;
 }
 
+// NOTE: I should probably just use this as a default implementation for drawing geometry.
 void engine_t::draw_geometry(vk::CommandBuffer cmd)
 {
     this->stats.drawcall_count = 0;
     this->stats.triangle_count = 0;
     auto start = std::chrono::system_clock::now();
 
-    std::vector<std::uint32_t> opaque_draws;
-    opaque_draws.reserve(this->main_draw_context.opaque_surfaces.size());
-
-    for (std::uint32_t i = 0; i < this->main_draw_context.opaque_surfaces.size(); ++i)
-    {
-        // NOTE: Frustum culling on small scenes appears to perform worse than just rendering off screen objects too.
-        // TODO: Needs further testing.
-        // NOTE: Right now I only check if one instance is visible. There probably is a better way of doing that to reduce
-        //       the number of instances that need to be rendered.
-        auto visible = is_visible(this->main_draw_context.opaque_surfaces[i], this->scene_data.gpu_data.viewproj);
-        for (auto vis : visible)
-        {
-            if (vis)
-            {
-                opaque_draws.push_back(i);
-                break;
-            }
-        }
-    }
+    std::vector<std::uint32_t> opaque_draws = frustum_culling(this->main_draw_context.opaque_surfaces, this->scene_data.gpu_data.viewproj);
 
     // BUG: This seems to break transparent objects when. Only occasionally though.
-    /* std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
-            const render_object_t& a = this->main_draw_context.opaque_surfaces[i];
-            const render_object_t& b = this->main_draw_context.opaque_surfaces[j];
-            if (a.material == b.material) return a.index_buffer < b.index_buffer;
-            return a.material < b.material;
-        });
-    */
+    // NOTE: Fixed maybe?
+    sort_surfaces(opaque_draws, this->main_draw_context.opaque_surfaces);
     
     // TODO: Used attachment should not be static.
     vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
@@ -382,7 +394,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     *scene_uniform_data = this->scene_data.gpu_data;
 
     auto ret = this->get_current_frame().frame_descriptors.allocate(this->device.dev, this->scene_data.layout);
-    if (!ret_buf.has_value())
+    if (!ret.has_value())
     {
         cmd.endRendering();
         return;
