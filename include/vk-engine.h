@@ -203,7 +203,9 @@ struct engine_t
 
     // TODO: Images should not be hard coded for general usage e.g. deferred rendering where more than one image is required before copying to the swapchain
     allocated_image_t draw_image;
+    std::vector<allocated_image_t> color_images;
     allocated_image_t depth_image;
+    std::vector<allocated_image_t> depth_images;
     vk::Extent2D draw_extent;
     float render_scale = 1.f;
 
@@ -362,7 +364,7 @@ struct engine_t
 
     // TODO: Seperating compute and geometry into only two functions might not be a good idea.
     //       See deferred shading, shadow mapping etc.
-    void draw_geometry(vk::CommandBuffer cmd);
+    void draw_geometry(vk::CommandBuffer cmd, std::vector<vk::RenderingAttachmentInfo> color_attachments, vk::RenderingAttachmentInfo depth_attachment);
     void draw_background(vk::CommandBuffer cmd);
     void draw_imgui(vk::CommandBuffer cmd, vk::ImageView target_image_view);
 
@@ -375,7 +377,11 @@ struct engine_t
         vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eColorAttachmentOptimal);
         vkutil::transition_image(cmd, this->depth_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal);
 
-        this->draw_geometry(cmd);
+        vk::ClearValue clear_value;
+        clear_value.depthStencil.depth = 1.f;
+        this->draw_geometry(cmd, { vk::RenderingAttachmentInfo(this->draw_image.view, vk::ImageLayout::eColorAttachmentOptimal) },
+                vk::RenderingAttachmentInfo(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {},
+                    vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, clear_value));
 
         vkutil::transition_image(cmd, this->draw_image.image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
         vkutil::transition_image(cmd, this->swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);

@@ -22,7 +22,7 @@ int main()
         vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 8),
         vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 12)
     };
-    if (!engine.metal_rough_material.build_pipelines(&engine, pwd + "/tests/build/shaders/mesh.vert.spv", pwd + "/tests/build/shaders/mesh.frag.spv",
+    if (!engine.metal_rough_material.build_pipelines(&engine, pwd + "/tests/build/shaders/pbr.vert.spv", pwd + "/tests/build/shaders/pbr.frag.spv",
                 sizeof(gpu_draw_push_constants_t), { {0, vk::DescriptorType::eUniformBuffer}, {1, vk::DescriptorType::eCombinedImageSampler}, {2, vk::DescriptorType::eCombinedImageSampler} },
                 {engine.scene_data.layout}, input_bindings, input_attriubtes)) return EXIT_FAILURE;
     engine.load_model(pwd + file, "sgb");
@@ -72,7 +72,20 @@ int main()
         vkutil::transition_image(cmd, engine.draw_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
         vkutil::transition_image(cmd, engine.depth_image.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal);
 
-        engine.draw_geometry(cmd);
+        vk::ClearValue clear_value;
+        clear_value.depthStencil.depth = 1.f;
+        std::vector<vk::RenderingAttachmentInfo> color_attachments = {
+            vk::RenderingAttachmentInfo(engine.color_images[0].view, vk::ImageLayout::eColorAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
+                    vk::AttachmentStoreOp::eStore, vk::ClearValue(vk::ClearColorValue(std::array<float, 4>{0}))),
+            vk::RenderingAttachmentInfo(engine.color_images[1].view, vk::ImageLayout::eColorAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
+                    vk::AttachmentStoreOp::eStore, vk::ClearValue(vk::ClearColorValue(std::array<float, 4>{0}))),
+            vk::RenderingAttachmentInfo(engine.color_images[2].view, vk::ImageLayout::eColorAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
+                    vk::AttachmentStoreOp::eStore, vk::ClearValue(vk::ClearColorValue(std::array<float, 4>{0})))
+        };
+        vk::RenderingAttachmentInfo depth_attachment(engine.depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
+                vk::AttachmentStoreOp::eStore, clear_value);
+
+        engine.draw_geometry(cmd, color_attachments, depth_attachment);
 
         vkutil::transition_image(cmd, engine.draw_image.image, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
         vkutil::transition_image(cmd, engine.swapchain.images[swapchain_img_idx], vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);

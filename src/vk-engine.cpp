@@ -361,7 +361,7 @@ void engine_t::update_scene()
 }
 
 // NOTE: I should probably just use this as a default implementation for drawing geometry.
-void engine_t::draw_geometry(vk::CommandBuffer cmd)
+void engine_t::draw_geometry(vk::CommandBuffer cmd, std::vector<vk::RenderingAttachmentInfo> color_attachments, vk::RenderingAttachmentInfo depth_attachment)
 {
     this->stats.drawcall_count = 0;
     this->stats.triangle_count = 0;
@@ -374,11 +374,7 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd)
     sort_surfaces(opaque_draws, this->main_draw_context.opaque_surfaces);
     
     // TODO: Used attachment should not be static.
-    vk::RenderingAttachmentInfo color_attachment(this->draw_image.view, vk::ImageLayout::eGeneral);
-    vk::RenderingAttachmentInfo depth_attachment(this->depth_image.view, vk::ImageLayout::eDepthAttachmentOptimal, {}, {}, {}, vk::AttachmentLoadOp::eClear,
-            vk::AttachmentStoreOp::eStore);
-    depth_attachment.clearValue.depthStencil.depth = 1.f;
-    vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachment, &depth_attachment);
+    vk::RenderingInfo render_info({}, { vk::Offset2D(0, 0), this->draw_extent }, 1, {}, color_attachments, &depth_attachment);
     cmd.beginRendering(render_info);
 
     // TODO: Scene data should not be restricted to this one struct.
