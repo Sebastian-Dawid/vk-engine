@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
-#include <glm/gtx/transform.hpp>
 #include <vk-engine.h>
 
 int main(int argc, char** argv)

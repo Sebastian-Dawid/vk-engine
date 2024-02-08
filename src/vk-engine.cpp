@@ -76,6 +76,7 @@ std::vector<std::uint32_t> frustum_culling(std::vector<render_object_t> opaque_s
     return opaque_draws;
 }
 
+// BUG: This is still broken, but it seems to be random how severe the error is.
 void sort_surfaces(std::vector<std::uint32_t>& opaque_draws, std::vector<render_object_t> opaque_surfaces)
 {
     std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
@@ -370,7 +371,6 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd, std::vector<vk::RenderingAtt
     std::vector<std::uint32_t> opaque_draws = frustum_culling(this->main_draw_context.opaque_surfaces, this->scene_data.gpu_data.viewproj);
 
     // BUG: This seems to break transparent objects when. Only occasionally though.
-    // NOTE: Fixed maybe?
     sort_surfaces(opaque_draws, this->main_draw_context.opaque_surfaces);
     
     // TODO: Used attachment should not be static.
