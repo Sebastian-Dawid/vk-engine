@@ -34,6 +34,7 @@ struct mesh_asset_t
 };
 
 struct engine_t;
+struct gltf_metallic_roughness_t;
 
 struct loaded_gltf_t : public renderable_i
 {
@@ -58,4 +59,5 @@ struct loaded_gltf_t : public renderable_i
     virtual ~loaded_gltf_t() { this->clear_all(); };
 };
 
-std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath, std::array<std::uint32_t, 3> bindings = { 0, 1, 2 });
+std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath, gltf_metallic_roughness_t& material,
+        std::array<std::uint32_t, 3> bindings = { 0, 1, 2 });

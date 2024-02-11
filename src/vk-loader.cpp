@@ -102,7 +102,8 @@ vk::SamplerMipmapMode extract_mipmap_mode(fastgltf::Filter filter)
     }
 }
 
-std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath, std::array<std::uint32_t, 3> bindings)
+std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::string_view filepath, gltf_metallic_roughness_t& material,
+        std::array<std::uint32_t, 3> bindings)
 {
 #ifdef DEBUG
     fmt::print("[ {} ]\tLoading glTF: {}\n", INFO_FMT("INFO"), filepath);
@@ -225,6 +226,7 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
             .size = sizeof(gltf_metallic_roughness_t::material_constants_t),
             .type = vk::DescriptorType::eUniformBuffer
         };
+
         gltf_metallic_roughness_t::material_resources_t::img_t color_image{ .binding = bindings[1],
             .image = engine->white_image,
             .sampler = engine->default_sampler_linear,
@@ -248,7 +250,16 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
             material_resources.images[0].sampler = file.samplers[sampler];
         }
 
-        auto ret = engine->metal_rough_material.write_material(engine->device.dev, pass_type, material_resources, file.descriptor_pool);
+        if (mat.pbrData.metallicRoughnessTexture.has_value())
+        {
+            std::size_t img = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].imageIndex.value();
+            std::size_t sampler = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].samplerIndex.value();
+
+            material_resources.images[1].image = images[img];
+            material_resources.images[1].sampler = file.samplers[sampler];
+        }
+
+        auto ret = material.write_material(engine->device.dev, pass_type, material_resources, file.descriptor_pool);
         if (!ret.has_value()) return std::nullopt;
         new_mat->data = ret.value();
         data_index++;
@@ -294,7 +305,13 @@ std::optional<std::shared_ptr<loaded_gltf_t>> load_gltf(engine_t* engine, std::s
                         });
             }
 
-            auto normals =p.findAttribute("NORMAL");
+            auto tangents = p.findAttribute("TANGENT");
+            if (tangents != p.attributes.end())
+            {
+                // TODO: Add tangents to vertex.
+            }
+
+            auto normals = p.findAttribute("NORMAL");
             if (normals != p.attributes.end())
             {
                 fastgltf::iterateAccessorWithIndex<glm::vec3>(gltf, gltf.accessors[normals->second],

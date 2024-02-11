@@ -22,9 +22,10 @@ int main()
         vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 8),
         vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32A32Sfloat, sizeof(float) * 12)
     };
+    std::vector<vk::Format> formats = { engine.draw_image.format, engine.draw_image.format, engine.draw_image.format };
     if (!engine.metal_rough_material.build_pipelines(&engine, pwd + "/tests/build/shaders/pbr.vert.spv", pwd + "/tests/build/shaders/pbr.frag.spv",
                 sizeof(gpu_draw_push_constants_t), { {0, vk::DescriptorType::eUniformBuffer}, {1, vk::DescriptorType::eCombinedImageSampler}, {2, vk::DescriptorType::eCombinedImageSampler} },
-                {engine.scene_data.layout}, input_bindings, input_attriubtes)) return EXIT_FAILURE;
+                {engine.scene_data.layout}, input_bindings, input_attriubtes, formats)) return EXIT_FAILURE;
     engine.load_model(pwd + file, "sgb");
     engine.loaded_scenes["sgb"]->transform.push_back(glm::scale(glm::mat4(1), glm::vec3(0.01f, 0.01f, 0.01f)));
 
@@ -66,6 +67,13 @@ int main()
         engine.scene_data.gpu_data.proj[1][1] *= -1;
         engine.scene_data.gpu_data.viewproj = engine.scene_data.gpu_data.proj * engine.scene_data.gpu_data.view ;
     };
+
+    for (std::uint8_t i = 0; i < 3; ++i)
+    {
+        engine.color_images.push_back(engine.create_image(engine.draw_image.extent, engine.draw_image.format,
+            vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eColorAttachment).value());
+    }
+    engine.main_deletion_queue.push_function([&](){ for (auto img : engine.color_images) engine.destroy_image(img); });
 
     engine.draw_cmd = [&](vk::CommandBuffer cmd, std::uint32_t swapchain_img_idx) -> vk::ImageLayout
     {

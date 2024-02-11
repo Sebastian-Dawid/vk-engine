@@ -35,6 +35,7 @@ struct pipeline_builder_t
     pipeline_builder_t& enable_blending_additive();
     pipeline_builder_t& enable_blending_alphablend();
     pipeline_builder_t& set_color_attachment_format(const vk::Format format);
+    pipeline_builder_t& set_color_attachment_count(const std::size_t count, const std::vector<vk::Format>& formats);
     pipeline_builder_t& set_depth_format(const vk::Format format);
     pipeline_builder_t& disable_depthtest();
     pipeline_builder_t& enable_depthtest(const bool depth_write_enable, const vk::CompareOp op);

@@ -76,7 +76,6 @@ std::vector<std::uint32_t> frustum_culling(std::vector<render_object_t> opaque_s
     return opaque_draws;
 }
 
-// BUG: This is still broken, but it seems to be random how severe the error is.
 void sort_surfaces(std::vector<std::uint32_t>& opaque_draws, std::vector<render_object_t> opaque_surfaces)
 {
     std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& i, const auto& j) {
@@ -100,7 +99,10 @@ void mesh_node_t::draw(const glm::mat4& top_matrix, draw_context_t& ctx)
             .transform = { node_matrix },
             .vertex_buffer_address = mesh->mesh_buffer.vertex_buffer_address
         };
-        ctx.opaque_surfaces.push_back(def);
+        if (s.material->data.pass_type == material_pass_e::TRANSPARENT)
+            ctx.transparent_surfaces.push_back(def);
+        else
+            ctx.opaque_surfaces.push_back(def);
     }
     node_t::draw(top_matrix, ctx);
 }
@@ -122,7 +124,10 @@ void mesh_node_t::draw(const std::vector<glm::mat4>& top_matrix, draw_context_t&
             .transform = transforms,
             .vertex_buffer_address = mesh->mesh_buffer.vertex_buffer_address
         };
-        ctx.opaque_surfaces.push_back(def);
+        if (s.material->data.pass_type == material_pass_e::TRANSPARENT)
+            ctx.transparent_surfaces.push_back(def);
+        else
+            ctx.opaque_surfaces.push_back(def);
     }
     node_t::draw(top_matrix, ctx);
 }
@@ -130,7 +135,7 @@ void mesh_node_t::draw(const std::vector<glm::mat4>& top_matrix, draw_context_t&
 bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string vertex, std::string fragment,
         std::size_t push_constants_size, std::vector<std::tuple<std::uint32_t, vk::DescriptorType>> bindings,
         std::vector<vk::DescriptorSetLayout> external_layouts, std::vector<vk::VertexInputBindingDescription> input_bindings,
-        std::vector<vk::VertexInputAttributeDescription> input_attributes)
+        std::vector<vk::VertexInputAttributeDescription> input_attributes, std::vector<vk::Format> formats)
 {
     auto vert_shader = vkutil::load_shader_module(vertex.c_str(), engine->device.dev);
     if (!vert_shader.has_value()) return false;
@@ -169,8 +174,12 @@ bool gltf_metallic_roughness_t::build_pipelines(engine_t* engine, std::string ve
         .set_multisampling_none()
         .disable_blending()
         .enable_depthtest(true, vk::CompareOp::eLess)
-        .set_color_attachment_format(engine->draw_image.format)
         .set_depth_format(engine->depth_image.format);
+
+    if (formats.size() == 0)
+        pipeline_builder.set_color_attachment_format(engine->draw_image.format);
+    else
+        pipeline_builder.set_color_attachment_count(formats.size(), formats);
 
     for (auto ib : input_bindings) pipeline_builder.add_vertex_input_binding(ib.binding, ib.stride, ib.inputRate);
     for (auto ia : input_attributes) pipeline_builder.add_vertex_input_attribute(ia.binding, ia.location, ia.format, ia.offset);
@@ -369,8 +378,6 @@ void engine_t::draw_geometry(vk::CommandBuffer cmd, std::vector<vk::RenderingAtt
     auto start = std::chrono::system_clock::now();
 
     std::vector<std::uint32_t> opaque_draws = frustum_culling(this->main_draw_context.opaque_surfaces, this->scene_data.gpu_data.viewproj);
-
-    // BUG: This seems to break transparent objects when. Only occasionally though.
     sort_surfaces(opaque_draws, this->main_draw_context.opaque_surfaces);
     
     // TODO: Used attachment should not be static.
@@ -1086,7 +1093,15 @@ bool engine_t::init_default_data()
 
 bool engine_t::load_model(std::string path, std::string name, std::array<std::uint32_t, 3> bindings)
 {
-    auto structured_file = load_gltf(this, path, bindings);
+    auto structured_file = load_gltf(this, path, this->metal_rough_material, bindings);
+    if (!structured_file.has_value()) return false;
+    this->loaded_scenes[name] = structured_file.value();
+    return true;
+}
+
+bool engine_t::load_model(std::string path, std::string name, gltf_metallic_roughness_t& material, std::array<std::uint32_t, 3> bindings)
+{
+    auto structured_file = load_gltf(this, path, material, bindings);
     if (!structured_file.has_value()) return false;
     this->loaded_scenes[name] = structured_file.value();
     return true;

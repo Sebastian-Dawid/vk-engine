@@ -122,6 +122,14 @@ pipeline_builder_t& pipeline_builder_t::set_color_attachment_format(const vk::Fo
     return *this;
 }
 
+pipeline_builder_t& pipeline_builder_t::set_color_attachment_count(const std::size_t count, const std::vector<vk::Format>& formats)
+{
+    if (count != formats.size()) fmt::print(stderr, "[ {} ]\tPipeline Builder: Attachment count does not match format count!\n", ERROR_FMT("ERROR"));
+    this->render_info.setColorAttachmentCount(count);
+    this->render_info.setColorAttachmentFormats(formats);
+    return *this;
+}
+
 pipeline_builder_t& pipeline_builder_t::set_depth_format(const vk::Format format)
 {
     this->render_info.depthAttachmentFormat = format;
@@ -156,7 +164,9 @@ pipeline_builder_t& pipeline_builder_t::add_vertex_input_attribute(std::uint32_t
 std::optional<vk::Pipeline> pipeline_builder_t::build(vk::Device dev)
 {
     vk::PipelineViewportStateCreateInfo viewport_state({}, 1, {}, 1);
-    vk::PipelineColorBlendStateCreateInfo color_blending({}, VK_FALSE, vk::LogicOp::eCopy, this->color_blend_attachment);
+    std::vector<vk::PipelineColorBlendAttachmentState> color_blend_states;
+    for (std::uint32_t i = 0; i < this->render_info.colorAttachmentCount; ++i) color_blend_states.push_back(this->color_blend_attachment);
+    vk::PipelineColorBlendStateCreateInfo color_blending({}, VK_FALSE, vk::LogicOp::eCopy, color_blend_states);
     vk::PipelineVertexInputStateCreateInfo vertex_input_info({}, this->vertex_input_binding_descriptions, this->vertex_input_attribute_descriptions);
     vk::DynamicState state[] = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
     vk::PipelineDynamicStateCreateInfo dynamic_info({}, state);
